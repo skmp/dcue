@@ -1,13 +1,11 @@
+using System;
+using System.IO;
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
-
-using System.Collections.Generic;
-using System.Collections;
-using System.Text;
-using UnityEngine.Rendering;
-using UnityEngine.Windows;
 
 public class DreamExporter : MonoBehaviour
 {
@@ -16,171 +14,206 @@ public class DreamExporter : MonoBehaviour
         public HashSet<Material> materials = new HashSet<Material>();
         public HashSet<Texture> textures = new HashSet<Texture>();
         public HashSet<Mesh> meshes = new HashSet<Mesh>();
-
         public List<GameObject> gameObjects = new List<GameObject>();
-    }
-
-    static string StringId(Object obj)
-    {
-        return obj.GetType().ToString().Replace(".", "_") + "_" + (uint)obj.GetInstanceID();
-    }
-
-    static string ToCPP(bool param)
-    {
-        return param ? "true" : "false";
     }
 
     [MenuItem("Dreamcast/Export Scene")]
     static void ExportScene()
     {
         Debug.Log("Collecting ...");
-
-        var ds = new DreamScene();
-
-        var scene = SceneManager.GetActiveScene();
+        DreamScene ds = new DreamScene();
+        Scene scene = SceneManager.GetActiveScene();
         if (scene != null)
         {
-            var rootObjects = scene.GetRootGameObjects();
-
-            foreach (var rootObject in rootObjects)
+            GameObject[] rootObjects = scene.GetRootGameObjects();
+            foreach (GameObject go in rootObjects)
             {
-                CollectObject(ds, rootObject);
+                CollectObject(ds, go);
             }
+        }
+
+        // Create lists (for consistent ordering) and dictionaries (for lookups)
+        List<Texture> textureList = new List<Texture>(ds.textures);
+        List<Material> materialList = new List<Material>(ds.materials);
+        List<Mesh> meshList = new List<Mesh>(ds.meshes);
+
+        Dictionary<Texture, int> textureIndex = new Dictionary<Texture, int>();
+        for (int i = 0; i < textureList.Count; i++)
+        {
+            textureIndex[textureList[i]] = i;
+        }
+        Dictionary<Material, int> materialIndex = new Dictionary<Material, int>();
+        for (int i = 0; i < materialList.Count; i++)
+        {
+            materialIndex[materialList[i]] = i;
+        }
+        Dictionary<Mesh, int> meshIndex = new Dictionary<Mesh, int>();
+        for (int i = 0; i < meshList.Count; i++)
+        {
+            meshIndex[meshList[i]] = i;
         }
 
         Debug.Log("Exporting ...");
-        var sb = new StringBuilder();
-
-        sb.AppendLine("// Textures");
-        foreach (var texture in ds.textures)
+        // Write binary file with header "DCUE0000"
+        using (FileStream fs = new FileStream("dream.dat", FileMode.Create))
+        using (BinaryWriter writer = new BinaryWriter(fs, Encoding.UTF8))
         {
-            sb.AppendLine("// " + texture.name);
-            sb.AppendLine("auto " + StringId(texture) + " = texture_t(\"" + AssetDatabase.GetAssetPath(texture) + "\", " + texture.width + ", " + texture.height + ");");
-        }
+            // Write header (8 bytes)
+            writer.Write(Encoding.ASCII.GetBytes("DCUE0000"));
 
-        sb.AppendLine("// Materials");
-        foreach (var material in ds.materials)
-        {
-            sb.AppendLine("// " + material.name);
-            sb.AppendLine("auto " + StringId(material) + " = material_t(" + material.color.a + ", " + material.color.r + ", " + material.color.g + ", " + material.color.b + ", " + (material.mainTexture == null ? "nullptr" : "&" + StringId(material.mainTexture)) + ");");
-        }
-
-        sb.AppendLine("// Meshes");
-        foreach (var mesh in ds.meshes)
-        {
-            var vertices = mesh.vertices;
-
-            sb.Append("float " + StringId(mesh) + "_vtx[] = { ");
-            foreach (var vertex in vertices)
+            // --------------------
+            // Write Textures Section
+            // --------------------
+            writer.Write(textureList.Count);
+            foreach (Texture tex in textureList)
             {
-                sb.Append(vertex.x + ", " + vertex.y + ", " + vertex.z + ", ");
+                // Write asset path as a length-prefixed string
+                string assetPath = AssetDatabase.GetAssetPath(tex);
+                writer.Write(assetPath);
+                writer.Write(tex.width);
+                writer.Write(tex.height);
             }
-            sb.AppendLine(" };");
 
-            var uvs = mesh.uv;
-
-            if (uvs.Length > 0)
+            // --------------------
+            // Write Materials Section
+            // --------------------
+            writer.Write(materialList.Count);
+            foreach (Material mat in materialList)
             {
-                sb.Append("float " + StringId(mesh) + "_uv[] = { ");
-                foreach (var uv in uvs)
+                // Write material color components (as floats)
+                Color col = mat.color;
+                writer.Write(col.a);
+                writer.Write(col.r);
+                writer.Write(col.g);
+                writer.Write(col.b);
+
+                // Write whether the material has a main texture.
+                // If so, write the index of that texture.
+                bool hasTexture = (mat.mainTexture != null) && textureIndex.ContainsKey(mat.mainTexture);
+                writer.Write(hasTexture);
+                if (hasTexture)
                 {
-                    sb.Append(uv.x + ", " + uv.y + ", ");
+                    writer.Write(textureIndex[mat.mainTexture]);
                 }
-                sb.AppendLine(" };");
-            }
-            else
-            {
-                sb.AppendLine("float* " + StringId(mesh) + "_uv = nullptr;");
             }
 
-            var colors = mesh.colors32;
-
-            if (colors.Length > 0)
+            // --------------------
+            // Write Meshes Section
+            // --------------------
+            writer.Write(meshList.Count);
+            foreach (Mesh mesh in meshList)
             {
-                sb.Append("uint8_t " + StringId(mesh) + "_col[] = { ");
-                foreach (var color in colors)
+                // Vertices: write count then each vertex (x, y, z)
+                Vector3[] vertices = mesh.vertices;
+                writer.Write(vertices.Length);
+                foreach (Vector3 v in vertices)
                 {
-                    sb.Append(color.a + ", " + color.r + ", " + color.g + ", " + color.b + ", ");
+                    writer.Write(v.x);
+                    writer.Write(v.y);
+                    writer.Write(v.z);
                 }
-                sb.AppendLine(" };");
-            }
-            else
-            {
-                sb.AppendLine("uint8_t* " + StringId(mesh) + "_col = nullptr;");
-            }
 
-            var normals = mesh.normals;
-
-            if (normals.Length > 0)
-            {
-                sb.Append("float " + StringId(mesh) + "_normal[] = { ");
-                foreach (var normal in normals)
+                // UVs: write count then each uv (x, y)
+                Vector2[] uvs = mesh.uv;
+                writer.Write(uvs.Length);
+                if (uvs.Length > 0)
                 {
-                    sb.Append(normal.x + ", " + normal.y + ", " + normal.z + ", ");
+                    foreach (Vector2 uv in uvs)
+                    {
+                        writer.Write(uv.x);
+                        writer.Write(uv.y);
+                    }
                 }
-                sb.AppendLine(" };");
-            }
-            else
-            {
-                sb.AppendLine("float* " + StringId(mesh) + "_normal = nullptr;");
+
+                // Colors: write count then each color (a, r, g, b as bytes)
+                Color32[] colors = mesh.colors32;
+                writer.Write(colors.Length);
+                if (colors.Length > 0)
+                {
+                    foreach (Color32 c in colors)
+                    {
+                        writer.Write(c.a);
+                        writer.Write(c.r);
+                        writer.Write(c.g);
+                        writer.Write(c.b);
+                    }
+                }
+
+                // Normals: write count then each normal (x, y, z)
+                Vector3[] normals = mesh.normals;
+                writer.Write(normals.Length);
+                if (normals.Length > 0)
+                {
+                    foreach (Vector3 n in normals)
+                    {
+                        writer.Write(n.x);
+                        writer.Write(n.y);
+                        writer.Write(n.z);
+                    }
+                }
+
+                // Indices: write count then each index as a ushort.
+                int[] indices = mesh.GetIndices(0);
+                if (indices.Length > 65535)
+                {
+                    throw new Exception("Mesh indices count > 65535");
+                }
+                writer.Write(indices.Length);
+                foreach (int index in indices)
+                {
+                    writer.Write((ushort)index);
+                }
             }
 
-            if (mesh.subMeshCount == 0)
+            // --------------------
+            // Write GameObjects Section
+            // --------------------
+            writer.Write(ds.gameObjects.Count);
+            foreach (GameObject go in ds.gameObjects)
             {
-                throw new System.Exception("mesh.subMeshCount != 0");
-            }
-            var indicies = mesh.GetIndices(0);
+                // Write active state (bool)
+                writer.Write(go.activeInHierarchy);
 
-            if (indicies.Length > 65535)
-            {
-                throw new System.Exception("indicies.Length > 65535");
-            }
+                // Write localToWorldMatrix (16 floats)
+                Matrix4x4 mtx = go.transform.localToWorldMatrix;
+                writer.Write(mtx.m00); writer.Write(mtx.m01);
+                writer.Write(mtx.m02); writer.Write(mtx.m03);
+                writer.Write(mtx.m10); writer.Write(mtx.m11);
+                writer.Write(mtx.m12); writer.Write(mtx.m13);
+                writer.Write(mtx.m20); writer.Write(mtx.m21);
+                writer.Write(mtx.m22); writer.Write(mtx.m23);
+                writer.Write(mtx.m30); writer.Write(mtx.m31);
+                writer.Write(mtx.m32); writer.Write(mtx.m33);
 
-            sb.Append("uint16_t " + StringId(mesh) + "_indicies[] = { ");
-            foreach (var ind in indicies)
-            {
-                sb.Append(ind + ", ");
+                // Check for an attached mesh and material.
+                Mesh mesh = null;
+                Material material = null;
+                bool meshEnabled = false;
+                MeshFilter mf = go.GetComponent<MeshFilter>();
+                MeshRenderer mr = go.GetComponent<MeshRenderer>();
+                if (mf != null && mr != null)
+                {
+                    mesh = mf.sharedMesh;
+                    material = mr.sharedMaterial;
+                    meshEnabled = mr.enabled;
+                }
+                writer.Write(meshEnabled);
+                // Write mesh index if mesh exists, else flag false.
+                bool hasMesh = (mesh != null) && meshIndex.ContainsKey(mesh);
+                writer.Write(hasMesh);
+                if (hasMesh)
+                {
+                    writer.Write(meshIndex[mesh]);
+                }
+                // Write material index if material exists.
+                bool hasMaterial = (material != null) && materialIndex.ContainsKey(material);
+                writer.Write(hasMaterial);
+                if (hasMaterial)
+                {
+                    writer.Write(materialIndex[material]);
+                }
             }
-            sb.AppendLine("};");
-
-            sb.AppendLine("// " + mesh.name);
-            sb.AppendLine("auto " + StringId(mesh) + " = mesh_t(" + indicies.Length + ", " + StringId(mesh) + "_indicies, " + vertices.Length + ", " + StringId(mesh) + "_vtx, " + StringId(mesh) + "_uv, " + StringId(mesh) + "_col, " + StringId(mesh) + "_normal);");
         }
-
-        sb.AppendLine("// Scene (GameObjects)");
-
-
-        foreach (var go in ds.gameObjects)
-        {
-            var mtx = go.transform.localToWorldMatrix;
-            Mesh mesh = null;
-            Material material = null;
-            bool meshEnabled = false;
-
-            if (go.GetComponent<MeshFilter>() != null && go.GetComponent<MeshRenderer>() != null)
-            {
-                mesh = go.GetComponent<MeshFilter>().sharedMesh;
-                material = go.GetComponent<MeshRenderer>().sharedMaterial;
-                meshEnabled = go.GetComponent<MeshRenderer>().enabled;
-            }
-
-            sb.AppendLine("matrix_t " + StringId(go) + "_ltw = { " + mtx.m00 + ", " + mtx.m01 + ", " + mtx.m02 + ", " + mtx.m03 + ",\n" +
-                                                                   + mtx.m10 + ", " + mtx.m11 + ", " + mtx.m12 + ", " + mtx.m13 + ",\n" +
-                                                                   + mtx.m20 + ", " + mtx.m21 + ", " + mtx.m22 + ", " + mtx.m23 + ",\n" +
-                                                                   + mtx.m30 + ", " + mtx.m31 + ", " + mtx.m32 + ", " + mtx.m33 + " };" );
-
-            sb.AppendLine("// " + go.name);
-            sb.AppendLine("auto " + StringId(go) + " = game_object_t(" + ToCPP(go.activeInHierarchy) + ", &" + StringId(go) + "_ltw, " + ToCPP(meshEnabled) + ", " + (mesh == null ? "nullptr" : "&" + StringId(mesh)) + ", " + (material == null ? "nullptr" : "&" + StringId(material)) + ");");
-        }
-
-        sb.Append("game_object_t* gameObjects[] = { ");
-        foreach (var go in ds.gameObjects)
-        {
-            sb.Append("&" + StringId(go) + ", ");
-        }
-        sb.AppendLine("};");
-
-        File.WriteAllBytes("dream.cpp", UTF8Encoding.UTF8.GetBytes(sb.ToString()));
 
         Debug.Log("Done!");
     }
@@ -188,23 +221,21 @@ public class DreamExporter : MonoBehaviour
     static void CollectObject(DreamScene ds, GameObject gameObject)
     {
         ds.gameObjects.Add(gameObject);
-        
-        for (int i = 0; i < gameObject.GetComponentCount(); i++)
+
+        int compCount = gameObject.GetComponentCount();
+        for (int i = 0; i < compCount; i++)
         {
             var component = gameObject.GetComponentAtIndex(i);
-            //Debug.Log("\t COMP " + i + " type: " + component.GetType().Name);
-
             if (component.GetType() == typeof(MeshFilter))
             {
-                var meshFilter = (MeshFilter)component;
-                var mesh = meshFilter.sharedMesh;
+                MeshFilter meshFilter = (MeshFilter)component;
+                Mesh mesh = meshFilter.sharedMesh;
                 ds.meshes.Add(mesh);
 
-                var meshRenderer = gameObject.GetComponent<MeshRenderer>();
+                MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>();
                 if (meshRenderer != null && meshRenderer.sharedMaterial != null)
                 {
                     ds.materials.Add(meshRenderer.sharedMaterial);
-
                     if (meshRenderer.sharedMaterial.mainTexture != null)
                     {
                         ds.textures.Add(meshRenderer.sharedMaterial.mainTexture);
