@@ -17,6 +17,29 @@ public class DreamExporter : MonoBehaviour
         public List<GameObject> gameObjects = new List<GameObject>();
     }
 
+    static Texture2D GetReadableTexture(Texture source)
+    {
+        // Create a temporary RenderTexture of the same size as the source
+        RenderTexture tmp = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.Default, RenderTextureReadWrite.Linear);
+        Graphics.Blit(source, tmp);
+
+        // Backup the currently active RenderTexture
+        RenderTexture previous = RenderTexture.active;
+        RenderTexture.active = tmp;
+
+        // Create a new Texture2D and read the RenderTexture contents into it
+        Texture2D readableTexture = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
+        readableTexture.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0);
+        readableTexture.Apply();
+
+        // Restore previously active RenderTexture and release the temporary one
+        RenderTexture.active = previous;
+        RenderTexture.ReleaseTemporary(tmp);
+
+        return readableTexture;
+    }
+
+
     [MenuItem("Dreamcast/Export Scene")]
     static void ExportScene()
     {
@@ -72,6 +95,28 @@ public class DreamExporter : MonoBehaviour
                 writer.Write(assetPath);
                 writer.Write(tex.width);
                 writer.Write(tex.height);
+
+                // If the texture is a Texture2D, try to get its pixel data.
+                Texture2D tex2D = tex as Texture2D;
+                if (tex2D != null)
+                {
+                    // If texture is not readable, create a readable copy.
+                    if (!tex2D.isReadable)
+                    {
+                        tex2D = GetReadableTexture(tex2D);
+                    }
+                    
+                    byte[] rawData = tex2D.GetRawTextureData();
+                    if (rawData.Length != tex2D.width * tex2D.height * 4)
+                    {
+                        throw new Exception("Texture data size mismatch");
+                    }
+                    writer.Write(rawData);          // Write the pixel data.
+                }
+                else
+                {
+                    thow new Exception("Texture is not a Texture2D");
+                }
             }
 
             // --------------------

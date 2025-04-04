@@ -1,5 +1,4 @@
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_image.h>
 #include <SDL2/SDL_opengl.h>
 #include <OpenGL/glu.h>
 #include <cstdio>
@@ -12,7 +11,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
-#include <unistd.h>
+#include <cassert>
 
 // Provided structs
 struct texture_t {
@@ -29,29 +28,13 @@ struct texture_t {
         this->id = 0;
     }
 
-    void load()
+    void load(void* texdata)
     {
-        if (this->id != 0) {
-            return;
-        }
-        SDL_Surface* loadedSurface = IMG_Load(file);
-        if (!loadedSurface) {
-            printf("Failed to load texture %s: %s\n", file, IMG_GetError());
-            return;
-        }
-
-        // Convert to a known format (e.g., SDL_PIXELFORMAT_RGBA32)
-        SDL_Surface* formattedSurface = SDL_ConvertSurfaceFormat(loadedSurface, SDL_PIXELFORMAT_RGBA32, 0);
-        SDL_FreeSurface(loadedSurface);
-        if (!formattedSurface) {
-            printf("Failed to convert surface format: %s\n", SDL_GetError());
-            return;
-        }
-
-        glGenTextures(1, &this->id);
-        glBindTexture(GL_TEXTURE_2D, this->id);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, formattedSurface->w, formattedSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, formattedSurface->pixels);
-        SDL_FreeSurface(formattedSurface);
+        assert(id == 0);
+        
+        glGenTextures(1, &id);
+        glBindTexture(GL_TEXTURE_2D, id);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texdata);
         
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -174,6 +157,11 @@ void loadDreamScene() {
         char* fileStr = new char[assetPath.size() + 1];
         strcpy(fileStr, assetPath.c_str());
         texture_t* tex = new texture_t(fileStr, width, height);
+        size_t size = width * height * 4;
+        void* texdata = malloc(size);
+        in.read(reinterpret_cast<char*>(texdata), size);
+        tex->load(texdata);
+        free(texdata);
         textures.push_back(tex);
     }
 
@@ -329,7 +317,6 @@ void renderGameObject(game_object_t* obj) {
     // Set the material color (ignoring texture for simplicity)
     if (obj->material) {
         if (obj->material->texture) {
-            obj->material->texture->load();
             glBindTexture(GL_TEXTURE_2D, obj->material->texture->id);
             glEnable(GL_TEXTURE_2D);
         }
@@ -391,9 +378,6 @@ void renderGameObject(game_object_t* obj) {
 }
 
 int main(int argc, char* argv[]) {
-
-    // Change to your working directory as needed
-    chdir("/Users/skmp/projects/DreamExportTest");
 
     // Initialize SDL with video support
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
