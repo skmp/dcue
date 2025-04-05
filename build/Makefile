@@ -43,10 +43,24 @@ CXXFLAGS+= -MMD -MP
 clean:
 	-rm -f $(OBJS_SIM) $(TARGET) $(DEPS_SIM)
 
+pvrtex:
+	$(MAKE) -C ../vendor/pvrtex
+
 $(TARGET): $(OBJS_SIM)
 	$(CXX) -fno-pic -no-pie -o $(TARGET) $(OBJS_SIM) -lX11
 
-repacker.elf: ../repacker.cpp
-	$(CXX) -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACK $<
+
+%.repacker.o: %.c
+	$(CC) -c -O3 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_REPACKER $<
+%.repacker.o: %.cpp
+	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_REPACKER $<
+
+
+OBJS_REPACKER= ../repacker.repacker.o ../vendor/dca3/vq.repacker.o
+
+repacker.elf: $(OBJS_REPACKER) | pvrtex
+	$(CXX) -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER)
+
+.PHONY: pvrtex
 
 -include $(DEPS_SIM)

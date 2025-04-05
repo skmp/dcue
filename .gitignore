@@ -4,3 +4,4 @@
 *.o3
 *.d
 *.elf
+build/repack-data/*

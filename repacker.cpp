@@ -8,9 +8,16 @@
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include <cassert>
 
 #include "dcue/types.h"
+#include <sys/stat.h>
+
+#include "vendor/crypto/sha256.h"
+#include "vendor/dca3/vq.h"
+#include "vendor/dca3/tex-util.h"
 
 // Global vectors to store the scene data
 std::vector<texture_t*> textures;
@@ -69,12 +76,10 @@ void loadDreamScene(const char *scene) {
         // Copy assetPath into a new char array for texture_t
         char* fileStr = new char[assetPath.size() + 1];
         strcpy(fileStr, assetPath.c_str());
-        texture_t* tex = new texture_t(fileStr, width, height);
         size_t size = width * height * 4;
         void* texdata = malloc(size);
         in.read(reinterpret_cast<char*>(texdata), size);
-        // tex->load(texdata);
-        free(texdata);
+        texture_t* tex = new texture_t(fileStr, width, height, texdata);
         textures.push_back(tex);
     }
 
@@ -202,6 +207,30 @@ void loadDreamScene(const char *scene) {
            static_cast<int>(meshes.size()), static_cast<int>(gameObjects.size()));
 }
 
-int main() {
-    loadDreamScene("dream.dat");
+int main(int argc, const char** argv) {
+    if (argc != 2) {
+        std::cout << argv[0] << " <scene.dat>" << std::endl;
+        return 1;
+    }
+
+    loadDreamScene(argv[1]);
+
+    mkdir("repack-data", 0755);
+
+    for (auto& tex: textures) {
+        hash_sha256 hash;
+        hash.sha256_init();
+        hash.sha256_update((const uint8_t*)tex->data, tex->height * tex->width * 4);
+        sha256_type hash_result = hash.sha256_final();
+
+        std::stringstream ss;
+        ss << "repack-data/tex_";
+        for (int h = 0; h < hash_result.size(); h++) {
+            ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash_result[h];
+        }
+        ss << ".tga";
+
+        auto imageData = createImageFromData_ARGB8888((const uint8_t*)tex->data, tex->width, tex->height, tex->width * 4);
+        writeTGA(ss.str().c_str(), imageData, tex->width, tex->height, 32);
+    }
 }

@@ -5,12 +5,14 @@ struct texture_t {
     const char* file;
     int width;
     int height;
+    const void* data;
 
-    texture_t(const char* file, int width, int height)
+    texture_t(const char* file, int width, int height, const void* data)
     {
         this->file = file;
         this->width = width;
         this->height = height;
+        this->data = data;
     }
 };
 
