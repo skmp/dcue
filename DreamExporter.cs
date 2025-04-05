@@ -115,7 +115,7 @@ public class DreamExporter : MonoBehaviour
                 }
                 else
                 {
-                    thow new Exception("Texture is not a Texture2D");
+                    throw new Exception("Texture is not a Texture2D");
                 }
             }
 
