@@ -4,7 +4,7 @@ all: $(TARGET)
 
 # include common.mk
 
-OBJS = ../main.o ../dcue/alloc.o
+OBJS = ../main.o ../vendor/gldc/alloc.o
 
 OBJS_SIM=$(OBJS:.o=.sim.o) \
 	../vendor/koshle/hlekos.sim.o \
