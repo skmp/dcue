@@ -1729,7 +1729,12 @@ RGBAf ambLight = { 0.4f, 0.4f, 0.4f, 1.0f };
 float ambient = 1.0f;
 RGBAf diffuseLight = { 0.8f, 0.8f, 0.8f, 1.0f };
 float diffuse = 1.0f;
-
+r_matrix_t diffusePos { 
+    1, 0, 0, 0,
+    0, 0.7071068, 0.7071068, 0,
+    0, -0.7071068, 0.7071068, 0,
+    0, 3, 0, 1
+};
 
 void invertGeneral(r_matrix_t *dst, const r_matrix_t *src)
 {
@@ -2001,6 +2006,15 @@ constexpr size_t freeVertexTarget_Step_Down = 4 * 1024;
 constexpr size_t freeVertexTarget_Min = 64 * 1024;
 size_t freeVertexTarget = freeVertexTarget_Min;
 
+struct alignas(8) UniformObject
+{
+	float dir[MAX_LIGHTS/4][4][4];
+	RGBAf col[MAX_LIGHTS];
+	RGBAf        ambLight;
+	int lightCount;
+};
+
+
 template<int list>
 void renderMesh(Camera* cam, game_object_t* go) {
     if (vertexBufferFree() < freeVertexTarget) {
@@ -2070,11 +2084,31 @@ void renderMesh(Camera* cam, game_object_t* go) {
 
     RGBAf lightDiffuseColors[MAX_LIGHTS];
 
-    auto cntDiffuse = 0;
+    auto cntDiffuse = 1;
+    r_matrix_t invLtw;
+    invertGeneral(&invLtw, &go->ltw);
 
-    // lightDiffuseColors[0].red = material.red * diffuseLight.red * diffuse;
-    // lightDiffuseColors[0].green = material.green * diffuseLight.green * diffuse;
-    // lightDiffuseColors[0].blue = material.blue * diffuseLight.blue * diffuse;
+    UniformObject uniformObject;
+    mat_load((matrix_t*)&invLtw);
+    {
+        unsigned n = 0;
+        uniformObject.col[n] = diffuseLight;
+        mat_trans_nodiv_nomod_zerow(
+            diffusePos.at.x, diffusePos.at.y, diffusePos.at.z,
+            uniformObject.dir[n>>2][0][n&3],
+            uniformObject.dir[n>>2][1][n&3],
+            uniformObject.dir[n>>2][2][n&3],
+            uniformObject.dir[n>>2][3][n&3]
+        );
+
+        uniformObject.dir[n>>2][3][n&3] = 0;
+    }
+
+    for (unsigned i = 0; i < cntDiffuse; i++) {
+        lightDiffuseColors[i].red = material.red * uniformObject.col[i].red * diffuse;
+        lightDiffuseColors[i].green = material.green * uniformObject.col[i].green * diffuse;
+        lightDiffuseColors[i].blue = material.blue * uniformObject.col[i].blue * diffuse;
+    }
 
     bool global_needsNoClip = false;
 
@@ -2169,7 +2203,7 @@ void renderMesh(Camera* cam, game_object_t* go) {
             unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
             tnlMeshletFillResidualSelector[0](OCR_SPACE + dstColOffset, meshlet->vertexCount, &residual);
         }
-#if 0
+
         if (cntDiffuse) {
             unsigned normalOffset = (selector & 8) ? (3 * 2) : (3 * 4);
             if (selector & 16) {
@@ -2186,16 +2220,8 @@ void renderMesh(Camera* cam, game_object_t* go) {
             
             unsigned normalSelector = (pass1 - 1);
             mat_load((matrix_t*)&uniformObject.dir[0][0][0]);
-            auto normalPointer = &dcModel->data[meshlet->vertexOffset] + normalOffset;
+            auto normalPointer = &go->mesh->data[meshlet->vertexOffset] + normalOffset;
             auto vtxSize = meshlet->vertexSize;
-            if (skin) {
-                vtxSize = 64;
-                if (textured) {
-                    normalPointer = OCR_SPACE + offsetof(pvr_vertex64_t, _dmy1);
-                } else {
-                    normalPointer = OCR_SPACE + offsetof(pvr_vertex64_t, a);
-                }
-            }
             tnlMeshletDiffuseColorSelector[normalSelector](OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, &lightDiffuseColors[0]);
         
             if (pass2) {
@@ -2204,7 +2230,7 @@ void renderMesh(Camera* cam, game_object_t* go) {
                 tnlMeshletDiffuseColorSelector[normalSelector](OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, &lightDiffuseColors[4]);
             }
         }
-#endif
+
         auto indexData = (int8_t*)&go->mesh->data[meshlet->indexOffset];
 
         if (!clippingRequired) {
@@ -2252,11 +2278,11 @@ int main(int argc, const char** argv) {
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1
+        0, 2.45, -10, 1
     };
 
     cam.setFOV(45.0f, 4.0f / 3.0f);
-    cam.nearPlane = 0.1f;
+    cam.nearPlane = 0.001f;
     cam.farPlane = 1000.0f;
 
     cam.buildClipPersp();

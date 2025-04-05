@@ -127,7 +127,7 @@ void x11_window_create()
 
     delete x11Visual;
 
-    x11_window_set_text("GTA3dc");
+    x11_window_set_text("The Liquid Jet - Dreamcast Sim");
 }
 
 void x11_window_destroy()
