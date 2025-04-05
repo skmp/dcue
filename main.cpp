@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <cassert>
+#include <cstring>
 
 #define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
 
@@ -2282,7 +2283,7 @@ int main(int argc, const char** argv) {
     };
 
     cam.setFOV(45.0f, 4.0f / 3.0f);
-    cam.nearPlane = 0.001f;
+    cam.nearPlane = 0.1f;
     cam.farPlane = 1000.0f;
 
     cam.buildClipPersp();
