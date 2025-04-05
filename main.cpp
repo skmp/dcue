@@ -20,11 +20,42 @@
 
 #if defined(DC_SH4)
 #define FLUSH_TA_DATA(src) do { __asm__ __volatile__("ocbwb @%0" : : "r" (src) : "memory"); } while(0)
+#define mat_trans_nodiv_nomod(x, y, z, x2, y2, z2, w2) do { \
+	register float __x __asm__("fr12") = (x); \
+	register float __y __asm__("fr13") = (y); \
+	register float __z __asm__("fr14") = (z); \
+	register float __w __asm__("fr15") = 1.0f; \
+	__asm__ __volatile__( "ftrv  xmtrx, fv12\n" \
+						  : "=f" (__x), "=f" (__y), "=f" (__z), "=f" (__w) \
+						  : "0" (__x), "1" (__y), "2" (__z), "3" (__w) ); \
+	x2 = __x; y2 = __y; z2 = __z; w2 = __w; \
+} while(false)
+
+#define mat_trans_nodiv_nomod_zerow(x, y, z, x2, y2, z2, w2) do { \
+	register float __x __asm__("fr12") = (x); \
+	register float __y __asm__("fr13") = (y); \
+	register float __z __asm__("fr14") = (z); \
+	register float __w __asm__("fr15") = 0.0f; \
+	__asm__ __volatile__( "ftrv  xmtrx, fv12\n" \
+						  : "=f" (__x), "=f" (__y), "=f" (__z), "=f" (__w) \
+						  : "0" (__x), "1" (__y), "2" (__z), "3" (__w) ); \
+	x2 = __x; y2 = __y; z2 = __z; w2 = __w; \
+} while(false)
+
+#define mat_trans_w_nodiv_nomod(x, y, z, w) do { \
+	register float __x __asm__("fr12") = (x); \
+	register float __y __asm__("fr13") = (y); \
+	register float __z __asm__("fr14") = (z); \
+	register float __w __asm__("fr15") = 1.0f; \
+	__asm__ __volatile__( "ftrv  xmtrx, fv12\n" \
+						  : "=f" (__x), "=f" (__y), "=f" (__z), "=f" (__w) \
+						  : "0" (__x), "1" (__y), "2" (__z), "3" (__w) ); \
+	w = __w; \
+} while(false)
 #else
 #define dcache_pref_block(x) do { } while (false)
 #define frsqrt(a) 				(1.0f/sqrtf(a))
 #define FLUSH_TA_DATA(src) do { pvr_dr_commit(src); } while(0)
-#endif
 
 #define mat_trans_single3_nomod(x_, y_, z_, x2, y2, z2) do { \
     vector_t tmp = { x_, y_, z_, 1.0f }; \
@@ -53,6 +84,7 @@
 } while(false)
 
 #define memcpy4 memcpy
+#endif
 
 struct alignas(32) pvr_vertex64_t {
 	uint32_t flags;			/**< \brief TA command (vertex flags) */
@@ -1811,7 +1843,6 @@ struct Camera {
 
     void setFOV(float hfov, float ratio)
     {
-        V2d v;
         float w, h;
 
         w = (float)640;
@@ -1837,7 +1868,7 @@ struct Camera {
         buildClipPersp();
         
         // calculate devViewProjScreen
-        float view[16], proj[16];
+		alignas(8) float view[16], proj[16];
 
         // View Matrix
         r_matrix_t inv;

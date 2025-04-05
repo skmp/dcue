@@ -14,6 +14,7 @@ DATA_DIR=repack-data/tlj
 # include common.mk
 
 OBJS = ../main.o ../vendor/gldc/alloc.o
+DEPS_OBJS=$(OBJS:.o=.d)
 
 OBJS_SIM=$(OBJS:.o=.sim.o) \
 	../vendor/koshle/hlekos.sim.o \
@@ -53,7 +54,7 @@ CXXFLAGS += \
 	-fno-strict-aliasing -fwrapv -Wno-unknown-pragmas
 
 KOS_CPPFLAGS += -fbuiltin -ffast-math -ffp-contract=fast \
-	-mfsrra -mfsca -DDC_SH4 -ml -fipa-pta -fno-enforce-eh-specs
+	-mfsrra -mfsca -ml -fipa-pta -fno-enforce-eh-specs
 
 ifdef KOS_BASE
 include $(KOS_BASE)/Makefile.rules
@@ -62,7 +63,7 @@ $(warning "KOS_BASE is not set. Only prebuilt targets will work.")
 endif
 
 %.o: %.cpp
-	kos-c++ $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+	kos-c++ $(CXXFLAGS) $(CPPFLAGS) -DDC_SH4=1 -c $< -o $@
 
 $(TARGET): $(OBJS)
 	kos-c++ -o $(TARGET) $(OBJS) -Wl,--gc-sections -Wl,--as-needed -Wl,-Map,output.map
@@ -92,6 +93,7 @@ $(TARGET_SIM): $(OBJS_SIM)
 
 
 OBJS_REPACKER= ../repacker.repacker.o ../vendor/dca3/vq.repacker.o ../vendor/TriStripper/src/connectivity_graph.repacker.o ../vendor/TriStripper/src/policy.repacker.o ../vendor/TriStripper/src/tri_stripper.repacker.o
+DEPS_REPACKER=$(OBJS_REPACKER:.o=.d)
 
 repacker.elf: $(OBJS_REPACKER) | pvrtex
 	$(CXX) -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER)
@@ -101,4 +103,6 @@ $(PROJECT_NAME).cdi: $(TARGET)
 
 .PHONY: pvrtex
 
+-include $(DEPS_OBJS)
 -include $(DEPS_SIM)
+-include $(DEPS_REPACKER)

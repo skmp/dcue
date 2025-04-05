@@ -26,7 +26,7 @@ namespace native {
         uint8_t data[0];
     };
 
-    struct r_matrix_t {
+    struct alignas(8) r_matrix_t {
         union {
             struct {
                 float m00, m01, m02, m03;
