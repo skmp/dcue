@@ -1,6 +1,6 @@
 TARGET ?= tlg-sim.elf
 
-all: $(TARGET) repacker
+all: $(TARGET) repacker.elf
 
 # include common.mk
 
@@ -31,14 +31,15 @@ OBJS_SIM=$(OBJS:.o=.sim.o) \
 DEPS_SIM1=$(OBJS_SIM:.o=.d)
 DEPS_SIM=$(DEPS_SIM1:.o3=.d)
 
-CXXFLAGS+= -MMD -MP
+CLAGS+= -MMD -MP 
+CXXFLAGS+= -MMD -MP -std=c++20
 
 %.sim.o: %.c
-	$(CC) -c -O0 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -DDC_SIM $<
+	$(CC) -c -O0 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_SIM $<
 %.sim.o: %.cpp
-	$(CXX) -c -O0 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -DDC_SIM $<
+	$(CXX) -c -O0 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_SIM $<
 %.sim.o3: %.cpp
-	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -DDC_SIM $<
+	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_SIM $<
 
 clean:
 	-rm -f $(OBJS_SIM) $(TARGET) $(DEPS_SIM)

@@ -455,8 +455,12 @@ struct meshlet {
 		return sphere;
 	}
 };
+struct compressed_mesh_t {
+	Sphere bounding_sphere;
+	std::vector<uint8_t> data;
+};
 
-std::pair<Sphere, std::vector<uint8_t>> process_mesh(mesh_t *mesh) {
+compressed_mesh_t process_mesh(mesh_t *mesh) {
 	using namespace triangle_stripper;
 	
 	int32 n = 1;
@@ -779,12 +783,9 @@ int main(int argc, const char** argv) {
     mkdir("repack-data/tex", 0755);
     mkdir("repack-data/mesh", 0755);
 
-    auto outfile = std::ofstream(argv[2]);
-
-    outfile.write("DCUENS00", 8);
-    
     std::vector<pvr_tex> native_textures;
-    std::vector<size_t> native_textures_map;
+	std::map<sha256_type, size_t> native_textures_map;
+    std::map<texture_t*, size_t> native_textures_index;
 
     for (auto& tex: textures) {
         hash_sha256 hash;
@@ -829,12 +830,18 @@ int main(int argc, const char** argv) {
             auto res = system(encodeCmd.str().c_str());
 
             assert(res == 0);
-    
-            native_textures.push_back(loadPVR(pvr_filename.c_str()));
         }
 
-        native_textures_map.push_back(native_textures.size() - 1);
+		if (native_textures_map.find(hash_result) == native_textures_map.end()) {
+			native_textures_map[hash_result] = native_textures.size();
+			native_textures.push_back(loadPVR(pvr_filename.c_str()));
+		}
+        native_textures_index[tex] = native_textures_map[hash_result];
     }
+
+	std::vector<compressed_mesh_t> native_meshes;
+	std::map<sha256_type, size_t> native_meshes_map;
+    std::map<mesh_t*, size_t> native_meshes_index;
 
     for (auto& mesh: meshes) {
         hash_sha256 hash;
@@ -868,8 +875,102 @@ int main(int argc, const char** argv) {
             auto mesh_file = std::ofstream(mesh_filename);
 
             mesh_file.write("DCUENM00", 8);
-            mesh_file.write((const char*)&compressed_mesh.first, sizeof(compressed_mesh.first));
-            mesh_file.write((const char*)compressed_mesh.second.data(), compressed_mesh.second.size());
+            mesh_file.write((const char*)&compressed_mesh.bounding_sphere, sizeof(compressed_mesh.bounding_sphere));
+            mesh_file.write((const char*)compressed_mesh.data.data(), compressed_mesh.data.size());
         }
+
+		if (native_meshes_map.find(hash_result) == native_meshes_map.end()) {
+			auto mesh_file = std::ifstream(mesh_filename);
+			char tag[9] = { 0 };
+			mesh_file.read(tag, 8);
+			if (memcmp(tag, "DCUENM00", 8) != 0) {
+				std::cout << "Unexpeted mesh tag " << tag << std::endl;
+				return 1;
+			}
+			compressed_mesh_t mesh;
+
+			mesh_file.seekg(0, std::ios::end);
+			auto mesh_size = (size_t)mesh_file.tellg() - 8;
+			mesh_file.seekg(8, std::ios::beg);
+
+			mesh.data.resize(mesh_size - sizeof(mesh.bounding_sphere));
+
+			mesh_file.read((char*)&mesh.bounding_sphere, sizeof(mesh.bounding_sphere));
+			mesh_file.read((char*)mesh.data.data(), mesh.data.size());
+
+			native_meshes_map[hash_result] = native_meshes.size();
+			native_meshes.push_back(mesh);
+		}
+        native_meshes_index[mesh] = native_meshes_map[hash_result];
     }
+
+	auto outfile = std::ofstream(argv[2]);
+
+    outfile.write("DCUENS00", 8);
+    
+	uint32_t tmp;
+
+	tmp = (uint32_t)native_textures.size();
+	outfile.write((char*)&tmp, sizeof(tmp));
+	for(auto& native_tex: native_textures) {
+		tmp = (uint32_t)native_tex.data.size();
+		outfile.write((char*)&tmp, sizeof(tmp));
+
+		outfile.write((char*)&native_tex.flags, sizeof(native_tex.flags));
+		outfile.write((char*)&native_tex.offs, sizeof(native_tex.offs));
+		outfile.write((char*)&native_tex.lw, sizeof(native_tex.lw));
+		outfile.write((char*)&native_tex.lh, sizeof(native_tex.lh));
+
+		outfile.write((char*)native_tex.data.data(), native_tex.data.size());
+	}
+
+	std::map<material_t*, size_t> native_materials_index;
+	tmp = (uint32_t)materials.size();
+	outfile.write((char*)&tmp, sizeof(tmp));
+	for (auto& material: materials) {
+		outfile.write((char*)&material->a, sizeof(material->a));
+		outfile.write((char*)&material->r, sizeof(material->r));
+		outfile.write((char*)&material->g, sizeof(material->g));
+		outfile.write((char*)&material->b, sizeof(material->b));
+		if (material->texture) {
+			tmp = native_textures_index[material->texture];
+		} else {
+			tmp = UINT32_MAX;
+		}
+		outfile.write((char*)&tmp, sizeof(tmp));
+		native_materials_index[material] = native_materials_index.size();
+	}
+
+	tmp = (uint32_t)native_meshes.size();
+	outfile.write((char*)&tmp, sizeof(tmp));
+	for (auto& native_mesh: native_meshes) {
+		tmp = native_mesh.data.size();
+		outfile.write((char*)&tmp, sizeof(tmp));
+		outfile.write((char*)&native_mesh.bounding_sphere, sizeof(native_mesh.bounding_sphere));
+		outfile.write((char*)native_mesh.data.data(), native_mesh.data.size());
+	}
+
+	tmp = (uint32_t)gameObjects.size();
+	outfile.write((char*)&tmp, sizeof(tmp));
+	for (auto& gameObject: gameObjects) {
+		outfile.write((char*)&gameObject->active, sizeof(gameObject->active));
+		outfile.write((char*)&gameObject->transform->m00, 16 * sizeof(float));
+		outfile.write((char*)&gameObject->mesh_enabled, sizeof(gameObject->mesh_enabled));
+		if (gameObject->mesh) {
+			tmp = native_meshes_index[gameObject->mesh];
+		} else {
+			tmp = UINT32_MAX;
+		}
+		outfile.write((char*)&tmp, sizeof(tmp));
+		if (gameObject->material) {
+			tmp = native_materials_index[gameObject->material];
+		} else {
+			tmp = UINT32_MAX;
+		}
+		outfile.write((char*)&tmp, sizeof(tmp));
+	}
+
+	return 0;
+
+
 }

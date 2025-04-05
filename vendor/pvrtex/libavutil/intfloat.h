@@ -24,7 +24,7 @@
 #include <stdint.h>
 #include "attributes.h"
 
-union av_intfloat32 {
+union av_intfloat {
     uint32_t i;
     float    f;
 };
@@ -39,7 +39,7 @@ union av_intfloat64 {
  */
 static av_always_inline float av_int2float(uint32_t i)
 {
-    union av_intfloat32 v;
+    union av_intfloat v;
     v.i = i;
     return v.f;
 }
@@ -49,7 +49,7 @@ static av_always_inline float av_int2float(uint32_t i)
  */
 static av_always_inline uint32_t av_float2int(float f)
 {
-    union av_intfloat32 v;
+    union av_intfloat v;
     v.f = f;
     return v.i;
 }

@@ -1,7 +1,20 @@
 #pragma once
 
+struct V2d {
+    float x, y;
+};
 struct V3d {
     float x, y, z;
+};
+
+struct V4d {
+    float x, y, z, w;
+};
+
+struct Plane
+{
+	V3d normal;
+	float distance;
 };
 
 struct TexCoords {
@@ -38,11 +51,34 @@ inline V3d lerp(const V3d &a, const V3d &b, float r) {
 // RGBA
 struct RGBA
 {
-	uint8 red;
-	uint8 green;
-	uint8 blue;
-	uint8 alpha;
+	uint8_t red;
+	uint8_t green;
+	uint8_t blue;
+	uint8_t alpha;
 };
-inline RGBA makeRGBA(uint8 r, uint8 g, uint8 b, uint8 a) { RGBA c = { r, g, b, a }; return c; }
+inline RGBA makeRGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) { RGBA c = { r, g, b, a }; return c; }
 inline bool equal(const RGBA &c1, const RGBA &c2) { return c1.red == c2.red && c1.green == c2.green && c1.blue == c2.blue && c1.alpha == c2.alpha; }
 #define RWRGBAINT(r, g, b, a) ((uint32)((((a)&0xff)<<24)|(((b)&0xff)<<16)|(((g)&0xff)<<8)|((r)&0xff)))
+
+struct RGBAf
+{
+	float red;
+	float green;
+	float blue;
+	float alpha;
+};
+inline RGBAf makeRGBAf(float r, float g, float b, float a) { RGBAf c = { r, g, b, a }; return c; }
+inline bool equal(const RGBAf &c1, const RGBAf &c2) { return c1.red == c2.red && c1.green == c2.green && c1.blue == c2.blue && c1.alpha == c2.alpha; }
+inline RGBAf add(const RGBAf &a, const RGBAf &b) { return makeRGBAf(a.red+b.red, a.green+b.green, a.blue+b.blue, a.alpha+b.alpha); }
+inline RGBAf modulate(const RGBAf &a, const RGBAf &b) { return makeRGBAf(a.red*b.red, a.green*b.green, a.blue*b.blue, a.alpha*b.alpha); }
+inline RGBAf scale(const RGBAf &a, float f) { return makeRGBAf(a.red*f, a.green*f, a.blue*f, a.alpha*f); }
+inline void clamp(RGBAf *a) {
+	if(a->red > 1.0f) a->red = 1.0f;
+	if(a->red < 0.0f) a->red = 0.0f;
+	if(a->green > 1.0f) a->green = 1.0f;
+	if(a->green < 0.0f) a->green = 0.0f;
+	if(a->blue > 1.0f) a->blue = 1.0f;
+	if(a->blue < 0.0f) a->blue = 0.0f;
+	if(a->alpha > 1.0f) a->alpha = 1.0f;
+	if(a->alpha < 0.0f) a->alpha = 0.0f;
+}

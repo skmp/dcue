@@ -207,12 +207,12 @@ float neg_exp(float arg) {
 
  */
 uint32 float16(float f) {
-    union ieee32_t float32;
+    union ieee32_t flt;
     uint32 float16;
     uint32 sign, exponent, mantissa;
 
-    float32.flt32 = f;
-    sign = exponent = mantissa = float32.uit32;
+    flt.flt32 = f;
+    sign = exponent = mantissa = flt.uit32;
 
     sign = (sign >> 16) & 0x8000;
     exponent = (((exponent >> 23) & 0xff) - 127) & 0xff;
