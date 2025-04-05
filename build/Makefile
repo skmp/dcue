@@ -1,6 +1,15 @@
-TARGET ?= tlg-sim.elf
+TARGET ?= tlj.elf
+TARGET_SIM ?= tlj-sim.elf
 
-all: $(TARGET) repacker.elf
+PROJECT_NAME = tlj
+TEAM_NAME ="the gang"
+DISC_SERIAL = HB-TLJD
+RELEASE_DATE = 20250401
+MKDCDISC_PAD_OPTION=-N
+
+all: $(TARGET_SIM) $(TARGET) repacker.elf
+
+DATA_DIR=repack-data/tlj
 
 # include common.mk
 
@@ -31,8 +40,33 @@ OBJS_SIM=$(OBJS:.o=.sim.o) \
 DEPS_SIM1=$(OBJS_SIM:.o=.d)
 DEPS_SIM=$(DEPS_SIM1:.o3=.d)
 
-CLAGS+= -MMD -MP 
-CXXFLAGS+= -MMD -MP -std=c++20
+CLAGS += -MMD -MP 
+
+CXXFLAGS += \
+	-MMD -MP -ffunction-sections -fdata-sections -ffast-math \
+	-fmerge-all-constants -fomit-frame-pointer -ml -std=gnu++20 \
+	-fno-exceptions -fno-rtti -fipa-pta -fno-PIC -Wno-write-strings \
+	-Wno-deprecated-enum-enum-conversion -Wno-deprecated-enum-float-conversion \
+	-Wno-multichar -Wno-unused-value -Wno-char-subscripts -Wno-reorder \
+	-Wno-unused-function -Wno-class-memaccess -fno-permissive \
+	-fno-asynchronous-unwind-tables -fno-enforce-eh-specs -fno-non-call-exceptions \
+	-fno-strict-aliasing -fwrapv -Wno-unknown-pragmas
+
+KOS_CPPFLAGS += -fbuiltin -ffast-math -ffp-contract=fast \
+	-mfsrra -mfsca -DDC_SH4
+
+ifdef KOS_BASE
+include $(KOS_BASE)/Makefile.rules
+else
+$(warning "KOS_BASE is not set. Only prebuilt targets will work.")
+endif
+
+%.o: %.cpp
+	kos-c++ $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(TARGET): $(OBJS)
+	kos-c++ -o $(TARGET) $(OBJS) -Wl,--gc-sections -Wl,--as-needed -Wl,-Map,output.map
+	@echo && echo && echo "*** Build Completed Successfully ($(TARGET)) ***" && echo && echo
 
 %.sim.o: %.c
 	$(CC) -c -O0 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_SIM $<
@@ -47,8 +81,8 @@ clean:
 pvrtex:
 	$(MAKE) -C ../vendor/pvrtex
 
-$(TARGET): $(OBJS_SIM)
-	$(CXX) -fno-pic -no-pie -o $(TARGET) $(OBJS_SIM) -lX11
+$(TARGET_SIM): $(OBJS_SIM)
+	$(CXX) -fno-pic -no-pie -o $(TARGET_SIM) $(OBJS_SIM) -lX11
 
 
 %.repacker.o: %.c
@@ -61,6 +95,9 @@ OBJS_REPACKER= ../repacker.repacker.o ../vendor/dca3/vq.repacker.o ../vendor/Tri
 
 repacker.elf: $(OBJS_REPACKER) | pvrtex
 	$(CXX) -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER)
+
+$(PROJECT_NAME).cdi: $(TARGET)
+	mkdcdisc -e $(TARGET) -o $(PROJECT_NAME).cdi -d $(DATA_DIR)/ $(MKDCDISC_PAD_OPTION) -n $(PROJECT_NAME) -a $(TEAM_NAME) -s $(DISC_SERIAL) -r $(RELEASE_DATE)
 
 .PHONY: pvrtex
 

@@ -11,13 +11,18 @@
 #include <fstream>
 #include <iostream>
 
+#include <cmath>
+#include <cassert>
+
+#define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
+
 #define MAX_LIGHTS 8
 
-#define dcache_pref_block(x) do { } while (false)
-#define frsqrt(a) 				(1.0f/sqrt(a))
 #if defined(DC_SH4)
 #define FLUSH_TA_DATA(src) do { __asm__ __volatile__("ocbwb @%0" : : "r" (src) : "memory"); } while(0)
 #else
+#define dcache_pref_block(x) do { } while (false)
+#define frsqrt(a) 				(1.0f/sqrtf(a))
 #define FLUSH_TA_DATA(src) do { pvr_dr_commit(src); } while(0)
 #endif
 
@@ -1106,6 +1111,145 @@ __attribute__ ((noinline)) void submitMeshlet<true>(uint8_t* OCR, const int8_t* 
 }
 #endif
 
+
+void enter_oix_() {
+	#if defined(DC_SH4)
+	auto mask = irq_disable();
+	dcache_purge_all();
+	volatile uint32_t * CCN_CCR = (uint32_t *)0xFF00001C;
+	*CCN_CCR |= (1 << 7); // enable OIX
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+
+	for (unsigned i = 0x92000000; i < (0x92000000 + 8192); i += 32) {
+		__asm__ __volatile__ ("movca.l r0,@%0" : : "r" (i): "memory");
+	}
+
+	irq_restore(mask);
+	#endif
+}
+
+void leave_oix_() {
+	#if defined(DC_SH4)
+	auto mask = irq_disable();
+	dcache_inval_range(0x92000000, 8192);
+	dcache_purge_all();
+	volatile uint32_t * CCN_CCR = (uint32_t *)0xFF00001C;
+	*CCN_CCR &= ~( 1 << 7); // disable OIX
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	irq_restore(mask);
+	#endif
+}
+
+void enter_ocr_() {
+	#if defined(DC_SH4)
+	auto mask = irq_disable();
+	dcache_purge_all();
+	volatile uint32_t * CCN_CCR = (uint32_t *)0xFF00001C;
+	*CCN_CCR |= (1 << 5); // enable OCR (ORA)
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+
+	irq_restore(mask);
+	#endif
+}
+
+void leave_ocr_() {
+	#if defined(DC_SH4)
+	auto mask = irq_disable();
+	dcache_inval_range(0x92000000, 8192);
+	dcache_purge_all();
+	volatile uint32_t * CCN_CCR = (uint32_t *)0xFF00001C;
+	*CCN_CCR &= ~( 1 << 5); // disable OCR (ORA)
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	__asm__ __volatile__ ("nop");
+	irq_restore(mask);
+	#endif
+}
+
+#if defined(DC_SH4)
+#define FLUSH_TA_DATA(src) do { __asm__ __volatile__("ocbwb @%0" : : "r" (src) : "memory"); } while(0)
+#else
+#define FLUSH_TA_DATA(src) do { pvr_dr_commit(src); } while(0)
+#endif
+
+#if defined(DC_SH4)
+void (*enter_oix)() = (void(*)())(((uintptr_t)&enter_oix_) - 0x8c000000 + 0xAc000000);
+void (*leave_oix)() = (void(*)())(((uintptr_t)&leave_oix_) - 0x8c000000 + 0xAc000000);
+#else
+void (*enter_oix)() = enter_oix_;
+void (*leave_oix)() = leave_oix_;
+#endif
+
 // 8 kb in total
 #if defined(DC_SH4)
 uint8_t* OCR_SPACE;
@@ -2016,7 +2160,12 @@ void renderMesh(Camera* cam, game_object_t* go) {
     }
 }
 
-int main() {
+// extern "C" cus also used by KOS
+extern "C" const char* getExecutableTag() {
+	return "tlj "  ":" ;
+}
+
+int main(int argc, const char* argv) {
 
     if (pvr_params.fsaa_enabled) {
 		pvr_params.vertex_buf_size = (1024 + 768) * 1024;
@@ -2036,7 +2185,11 @@ int main() {
 	#endif
     pvr_init(&pvr_params);
 
-    loadScene("dream.ndt");
+    #if defined(DC_SH4)
+    loadScene("/cd/dream.ndt");
+    #else
+    loadScene("repack-data/tlj/dream.ndt");
+    #endif
 
     Camera cam;
     cam.go = new game_object_t();
@@ -2052,6 +2205,33 @@ int main() {
     cam.farPlane = 1000.0f;
 
     cam.buildClipPersp();
+
+	#if defined(DC_SH4)
+	OCR_SPACE = (uint8_t*)0x92000000;
+
+	bool has_oix = true;
+	enter_oix();
+	*(volatile uint8_t*)OCR_SPACE = 1;
+	if (*(volatile uint8_t*)OCR_SPACE != 1) {
+		has_oix = false;
+	}
+	leave_oix();
+
+	if (!has_oix) {
+		dbglog(DBG_CRITICAL, "You appear to be using an emulator that does not support OIX. Attempting fallback to OCR\n");
+		OCR_SPACE = (uint8_t*)0x7c001000;
+		enter_oix = (void(*)())(((uintptr_t)&enter_ocr_) - 0x8c000000 + 0xAc000000);
+		leave_oix = (void(*)())(((uintptr_t)&leave_ocr_) - 0x8c000000 + 0xAc000000);
+
+		for (size_t i = 0; i < ARRAY_SIZE(submitMeshletSelector); i++) {
+			submitMeshletSelector[i] = submitMeshletSelectorFallback[i];
+		}
+
+		for (size_t i = 0; i < ARRAY_SIZE(clipAndsubmitMeshletSelector); i++) {
+			clipAndsubmitMeshletSelector[i] = clipAndsubmitMeshletSelectorFallback[i];
+		}
+	}
+	#endif
 
     for(;;) {
         // get input
@@ -2110,6 +2290,8 @@ int main() {
         pvr_set_bg_color(0.5f, 0.5f, 0.5f);
 		pvr_wait_ready();
 
+        enter_oix();
+
         pvr_scene_begin();
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_OP_POLY);
@@ -2128,6 +2310,8 @@ int main() {
             }
         }
         pvr_list_finish();
+
+        leave_oix();
         pvr_scene_finish();
     }
 
