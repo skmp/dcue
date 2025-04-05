@@ -2030,7 +2030,7 @@ void renderMesh(Camera* cam, game_object_t* go) {
             list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
             PVR_DEPTHCMP_GREATER,
             PVR_DEPTHWRITE_ENABLE,
-            PVR_CULLING_CW,
+            PVR_CULLING_CCW,
             PVR_FOG_DISABLE
         );
     } else {
@@ -2043,7 +2043,7 @@ void renderMesh(Camera* cam, game_object_t* go) {
             list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
             PVR_DEPTHCMP_GREATER,
             PVR_DEPTHWRITE_ENABLE,
-            PVR_CULLING_CW,
+            PVR_CULLING_CCW,
             PVR_FOG_DISABLE
         );
     }
