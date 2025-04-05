@@ -11,8 +11,6 @@
 #include "vq.h"
 #include "vendor/gldc/alloc.h"
 
-#define texconvf(...)
-
 enum downsampleModes {
     NONE,
     HALF,

@@ -73,3 +73,16 @@ struct game_object_t {
         this->material = material;
     }
 };
+
+struct V3d {
+    float x, y, z;
+};
+
+struct TexCoords {
+    float u, v;
+};
+
+struct Sphere {
+    V3d center;
+    float radius;
+};

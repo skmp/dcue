@@ -51,12 +51,12 @@ $(TARGET): $(OBJS_SIM)
 
 
 %.repacker.o: %.c
-	$(CC) -c -O3 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_REPACKER $<
+	$(CC) -c -O3 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -I../vendor/TriStripper/include -DDC_REPACKER $<
 %.repacker.o: %.cpp
-	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_REPACKER $<
+	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -I../vendor/TriStripper/include -DDC_REPACKER $<
 
 
-OBJS_REPACKER= ../repacker.repacker.o ../vendor/dca3/vq.repacker.o
+OBJS_REPACKER= ../repacker.repacker.o ../vendor/dca3/vq.repacker.o ../vendor/TriStripper/src/connectivity_graph.repacker.o ../vendor/TriStripper/src/policy.repacker.o ../vendor/TriStripper/src/tri_stripper.repacker.o
 
 repacker.elf: $(OBJS_REPACKER) | pvrtex
 	$(CXX) -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER)
