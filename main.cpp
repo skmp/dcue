@@ -1777,15 +1777,13 @@ struct Camera {
 
     void buildPlanes()
     {
-        V3d at = go->ltw.at;
-
         V3d *c = frustumCorners;
         Plane *p = frustumPlanes;
         V3d v51 = sub(c[1], c[5]);
         V3d v73 = sub(c[3], c[7]);
 
         /* Far plane */
-        p[0].normal = at;
+        p[0].normal = go->ltw.at;
         p[0].distance = dot(p[0].normal, c[4]);
 
         /* Near plane */
@@ -1815,30 +1813,26 @@ struct Camera {
 
     void buildClipPersp()
     {
-        V3d up = go->ltw.up;
-        V3d right = go->ltw.right;
-        V3d at = go->ltw.at;
-        V3d pos = go->ltw.pos;
-
         /* First we calculate the 4 points on the view window. */
-        up = scale(up, viewWindow.y);
-        V3d left = scale(right, viewWindow.x);
-        V3d *c = frustumCorners;
-        c[0] = add(add(at, up), left);	// top left
-        c[1] = sub(add(at, up), left);	// top right
-        c[2] = sub(sub(at, up), left);	// bottom right
-        c[3] = add(sub(at, up), left);	// bottom left
+		V3d up = scale(go->ltw.up, viewWindow.y);
+		V3d left = scale(go->ltw.right, viewWindow.x);
+		V3d *c = frustumCorners;
+		c[0] = add(add(go->ltw.at, up), left);	// top left
+		c[1] = sub(add(go->ltw.at, up), left);	// top right
+		c[2] = sub(sub(go->ltw.at, up), left);	// bottom right
+		c[3] = add(sub(go->ltw.at, up), left);	// bottom left
 
-        /* Now Calculate near and far corners. */
-        V3d off = sub(scale(up, viewOffset.y), scale(right, viewOffset.x));
-        for(int32 i = 0; i < 4; i++){
-            V3d corner = sub(frustumCorners[i], off);
-            V3d pos = add(pos, off);
-            c[i] = add(scale(corner, nearPlane), pos);
-            c[i+4] = add(scale(corner, farPlane), pos);
-        }
+		/* Now Calculate near and far corners. */
+		V3d off = sub(scale(go->ltw.up, viewOffset.y),
+					scale(go->ltw.right, viewOffset.x));
+		for(int32 i = 0; i < 4; i++){
+			V3d corner = sub(frustumCorners[i], off);
+			V3d pos = add(go->ltw.pos, off);
+			c[i] = add(scale(corner, nearPlane), pos);
+			c[i+4] = add(scale(corner, farPlane), pos);
+		}
 
-        buildPlanes();
+		buildPlanes();
     }
 
     void setFOV(float hfov, float ratio)
@@ -2074,10 +2068,14 @@ void renderMesh(Camera* cam, game_object_t* go) {
 
     bool global_needsNoClip = false;
 
-    auto global_visible = cam->frustumTestSphereNear(&go->mesh->bounding_sphere);
+	mat_load((matrix_t*)&go->ltw);
+	Sphere sphere = go->mesh->bounding_sphere;
+	float w;
+	mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
+    auto global_visible = cam->frustumTestSphereNear(&sphere);
     if (global_visible == Camera::SPHEREOUTSIDE) {
-        // printf("Outside frustum cull\n");
-        return;
+        printf("Outside frustum cull (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
+        // return;
     } else if (global_visible == Camera::SPHEREINSIDE) {
         global_needsNoClip = true;
     }
@@ -2089,22 +2087,21 @@ void renderMesh(Camera* cam, game_object_t* go) {
         unsigned clippingRequired = 0;
 
         if (!global_needsNoClip) {
-            // if (!skin) {
-            //     Sphere sphere = meshlet->boundingSphere;
-            //     V3d::transformPoints(&sphere.center, &sphere.center, 1, atomic->getFrame()->getLTM());
-                
-            //     auto local_frustumTestResult = cam->frustumTestSphereNear(&sphere);;
-            //     if ( local_frustumTestResult == Camera::SPHEREOUTSIDE) {
-            //         // printf("Outside frustum cull\n");
-            //         continue;
-            //     }
+			// Sphere sphere = meshlet->boundingSphere;
+			// mat_load((matrix_t*)&go->ltw);
+			// float w;
+			// mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
+			
+			// auto local_frustumTestResult = cam->frustumTestSphereNear(&sphere);
+			// if ( local_frustumTestResult == Camera::SPHEREOUTSIDE) {
+			// 	printf("Outside local frustum cull\n");
+			// 	continue;
+			// }
 
-            //     if (local_frustumTestResult == Camera::SPHEREBOUNDARY_NEAR) {
-            //         clippingRequired = 1 + textured;
-            //     }
-            // } else {
-                clippingRequired = 1 + textured;
-            // }
+			// if (local_frustumTestResult == Camera::SPHEREBOUNDARY_NEAR) {
+			// 	clippingRequired = 1 + textured;
+			// }
+			clippingRequired = 1 + textured;
         }
 
         //isTextured, isNormaled, isColored, small_xyz, pad_xyz, small_uv
