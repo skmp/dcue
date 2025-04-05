@@ -1854,14 +1854,14 @@ void renderMesh(Camera* cam, game_object_t* go) {
 
     RGBAf residual, material;
     // Ambient Alpha ALWAYS = 1.0
-    residual.alpha = (1/255.0f) * go->material->color.alpha;
-    residual.red = ambLight.red * ambient * go->material->color.red * (1/ 255.0f);
-    residual.green = ambLight.green * ambient * go->material->color.green * (1/ 255.0f);
-    residual.blue = ambLight.blue * ambient * go->material->color.blue * (1/ 255.0f);
-    material.alpha = (1/255.0f) * go->material->color.alpha;
-    material.red = (1.0f / 255.0f / 255.0f) * go->material->color.red;
-    material.green = (1.0f / 255.0f / 255.0f) * go->material->color.green;
-    material.blue = (1.0f / 255.0f / 255.0f) * go->material->color.blue;
+    residual.alpha = go->material->color.alpha;
+    residual.red = ambLight.red * ambient * go->material->color.red;
+    residual.green = ambLight.green * ambient * go->material->color.green;
+    residual.blue = ambLight.blue * ambient * go->material->color.blue;
+    material.alpha = go->material->color.alpha;
+    material.red = (1.0f / 255.0f) * go->material->color.red;
+    material.green = (1.0f / 255.0f) * go->material->color.green;
+    material.blue = (1.0f / 255.0f) * go->material->color.blue;
 
     const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
     auto meshletInfoBytes = &go->mesh->data[meshInfo->meshletOffset];
@@ -2063,6 +2063,43 @@ int main() {
                 if (state->start) {
                     break;
                 }
+
+                mat_load((matrix_t*)&cam.go->ltw);
+
+                float x_dir = 0;
+
+                if (state->joyy > 64) {
+                    x_dir = -1;
+                } else if (state->joyy < -64) {
+                    x_dir = 1;
+                }
+
+                matrix_t translation_matrix = {
+                    { 1, 0, 0, 0 },
+                    { 0, 1, 0, 0 },
+                    { 0, 0, 1, 0 },
+                    { x_dir, 0, 0, 1 },
+                };
+
+				float y_rot = 0;
+
+				if (state->joyx > 64) {
+					y_rot = 10.0f * (3.1415f / 180.0f); // Convert degrees to radians
+				} else if (state->joyx < -64) {
+					y_rot = -10.0f * (3.1415f / 180.0f); // Convert degrees to radians
+				}
+
+                matrix_t rotation_matrix = {
+                    { cosf(y_rot), 0, -sinf(y_rot), 0 },
+                    { 0, 1, 0, 0 },
+                    { sinf(y_rot), 0, cosf(y_rot), 0 },
+                    { 0, 0, 0, 1 },
+                };
+
+                mat_apply(&rotation_matrix);
+                
+                mat_apply(&translation_matrix);
+                mat_store((matrix_t*)&cam.go->ltw);
             }
         }
 
