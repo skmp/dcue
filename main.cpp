@@ -2120,16 +2120,10 @@ void renderMesh(Camera* cam, game_object_t* go) {
             meshlet->boundingSphere.center.z
         );
 
-        {    
-            matrix_t ltw = {
-                { go->ltw.m00, go->ltw.m10, go->ltw.m20, go->ltw.m30 },
-                { go->ltw.m01, go->ltw.m11, go->ltw.m21, go->ltw.m31 },
-                { go->ltw.m02, go->ltw.m12, go->ltw.m22, go->ltw.m32 },
-                { go->ltw.m03, go->ltw.m13, go->ltw.m23, go->ltw.m33 }
-            };
+        {
 
             mat_load(&cam->devViewProjScreen);
-            mat_apply(&ltw);
+            mat_apply((matrix_t*)&go->ltw);
 
             if (selector & 8) {
                 // mat_load(&mtx);

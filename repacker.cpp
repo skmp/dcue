@@ -954,7 +954,13 @@ int main(int argc, const char** argv) {
 	outfile.write((char*)&tmp, sizeof(tmp));
 	for (auto& gameObject: gameObjects) {
 		outfile.write((char*)&gameObject->active, sizeof(gameObject->active));
-		outfile.write((char*)&gameObject->transform->m00, 16 * sizeof(float));
+		native::r_matrix_t ltw = {
+			gameObject->transform->m00, gameObject->transform->m10, gameObject->transform->m20, gameObject->transform->m30,
+			gameObject->transform->m01, gameObject->transform->m11, gameObject->transform->m21, gameObject->transform->m31,
+			gameObject->transform->m02, gameObject->transform->m12, gameObject->transform->m22, gameObject->transform->m32,
+			gameObject->transform->m03, gameObject->transform->m13, gameObject->transform->m23, gameObject->transform->m33
+		};
+		outfile.write((char*)&ltw, sizeof(ltw));
 		outfile.write((char*)&gameObject->mesh_enabled, sizeof(gameObject->mesh_enabled));
 		if (gameObject->mesh) {
 			tmp = native_meshes_index[gameObject->mesh];
