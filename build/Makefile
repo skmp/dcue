@@ -1,6 +1,6 @@
 TARGET ?= tlg-sim.elf
 
-all: $(TARGET)
+all: $(TARGET) repacker
 
 # include common.mk
 
@@ -34,16 +34,19 @@ DEPS_SIM=$(DEPS_SIM1:.o3=.d)
 CXXFLAGS+= -MMD -MP
 
 %.sim.o: %.c
-	$(CC) -c -O0 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -U_WIN32 -UWIN32 -UWINNT -Ui386 -DDC_SIM -DMACOS64 $<
+	$(CC) -c -O0 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -DDC_SIM $<
 %.sim.o: %.cpp
-	$(CXX) -c -O0 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -U_WIN32 -UWIN32 -UWINNT -Ui386 -DDC_SIM -DMACOS64 $<
+	$(CXX) -c -O0 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -DDC_SIM $<
 %.sim.o3: %.cpp
-	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -U_WIN32 -UWIN32 -UWINNT -Ui386 -DDC_SIM -DMACOS64 $<
+	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -DDC_SIM $<
 
 clean:
 	-rm -f $(OBJS_SIM) $(TARGET) $(DEPS_SIM)
 
 $(TARGET): $(OBJS_SIM)
 	$(CXX) -fno-pic -no-pie -o $(TARGET) $(OBJS_SIM) -lX11
+
+repacker.elf: ../repacker.cpp
+	$(CXX) -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACK $<
 
 -include $(DEPS_SIM)
