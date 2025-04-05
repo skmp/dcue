@@ -44,16 +44,16 @@ CLAGS += -MMD -MP
 
 CXXFLAGS += \
 	-MMD -MP -ffunction-sections -fdata-sections -ffast-math \
-	-fmerge-all-constants -fomit-frame-pointer -ml -std=gnu++20 \
-	-fno-exceptions -fno-rtti -fipa-pta -fno-PIC -Wno-write-strings \
+	-fmerge-all-constants -fomit-frame-pointer  -std=gnu++20 \
+	-fno-exceptions -fno-rtti -fno-PIC -Wno-write-strings \
 	-Wno-deprecated-enum-enum-conversion -Wno-deprecated-enum-float-conversion \
 	-Wno-multichar -Wno-unused-value -Wno-char-subscripts -Wno-reorder \
 	-Wno-unused-function -Wno-class-memaccess -fno-permissive \
-	-fno-asynchronous-unwind-tables -fno-enforce-eh-specs -fno-non-call-exceptions \
+	-fno-asynchronous-unwind-tables -fno-non-call-exceptions \
 	-fno-strict-aliasing -fwrapv -Wno-unknown-pragmas
 
 KOS_CPPFLAGS += -fbuiltin -ffast-math -ffp-contract=fast \
-	-mfsrra -mfsca -DDC_SH4
+	-mfsrra -mfsca -DDC_SH4 -ml -fipa-pta -fno-enforce-eh-specs
 
 ifdef KOS_BASE
 include $(KOS_BASE)/Makefile.rules

@@ -1947,8 +1947,31 @@ struct Camera {
     }
 };
 
+size_t vertexBufferFree() {
+    size_t end   = PVR_GET(PVR_TA_VERTBUF_END);
+    size_t pos   = PVR_GET(PVR_TA_VERTBUF_POS);
+
+    size_t free  = end - pos;
+
+	return free;
+}
+
+bool vertexOverflown() {
+	return  PVR_GET(PVR_TA_VERTBUF_POS) >= PVR_GET(PVR_TA_VERTBUF_END) ||
+			PVR_GET(PVR_TA_OPB_POS)*4 >= PVR_GET(PVR_TA_OPB_END);
+}
+
+constexpr size_t freeVertexTarget_Step_Up = 32 * 1024;
+constexpr size_t freeVertexTarget_Step_Down = 4 * 1024;
+constexpr size_t freeVertexTarget_Min = 64 * 1024;
+size_t freeVertexTarget = freeVertexTarget_Min;
+
 template<int list>
 void renderMesh(Camera* cam, game_object_t* go) {
+    if (vertexBufferFree() < freeVertexTarget) {
+        return;
+    }
+
     pvr_poly_hdr_t hdr;
     bool textured = go->material->texture != nullptr;
 
@@ -2165,7 +2188,7 @@ extern "C" const char* getExecutableTag() {
 	return "tlj "  ":" ;
 }
 
-int main(int argc, const char* argv) {
+int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
 		pvr_params.vertex_buf_size = (1024 + 768) * 1024;
@@ -2309,6 +2332,14 @@ int main(int argc, const char* argv) {
                 renderMesh<PVR_LIST_TR_POLY>(&cam, go);
             }
         }
+        if (vertexOverflown()) {
+			freeVertexTarget += freeVertexTarget_Step_Up;
+		} else {
+			freeVertexTarget -= freeVertexTarget_Step_Down;
+			if (freeVertexTarget < freeVertexTarget_Min) {
+				freeVertexTarget = freeVertexTarget_Min;
+			}
+		}
         pvr_list_finish();
 
         leave_oix();
