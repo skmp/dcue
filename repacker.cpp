@@ -18,7 +18,9 @@
 
 #include <filesystem>
 
-#include "dcue/types.h"
+#include "dcue/types-import.h"
+#include "dcue/types-native.h"
+
 #include <sys/stat.h>
 
 #include "vendor/crypto/sha256.h"
@@ -30,42 +32,7 @@
 
 #define texconvf(...) printf(__VA_ARGS__)
 
-// v3d functions
-inline V3d makeV3d(float x, float y, float z) { V3d v = { x, y, z }; return v; }
-inline bool equal(const V3d &v1, const V3d &v2) { return v1.x == v2.x && v1.y == v2.y && v1.z == v2.z; }
-inline V3d neg(const V3d &a) { return makeV3d(-a.x, -a.y, -a.z); }
-inline V3d add(const V3d &a, const V3d &b) { return makeV3d(a.x+b.x, a.y+b.y, a.z+b.z); }
-inline V3d sub(const V3d &a, const V3d &b) { return makeV3d(a.x-b.x, a.y-b.y, a.z-b.z); }
-inline V3d scale(const V3d &a, float r) { return makeV3d(a.x*r, a.y*r, a.z*r); }
-inline float length(const V3d &v) { return sqrtf(v.x*v.x + v.y*v.y + v.z*v.z); }
-inline V3d normalize(const V3d &v) { return scale(v, 1.0f/length(v)); }
-inline V3d setlength(const V3d &v, float l) { return scale(v, l/length(v)); }
-inline V3d cross(const V3d &a, const V3d &b) {
-	return makeV3d(a.y*b.z - a.z*b.y,
-	               a.z*b.x - a.x*b.z,
-	               a.x*b.y - a.y*b.x);
-}
-inline float dot(const V3d &a, const V3d &b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
-inline V3d lerp(const V3d &a, const V3d &b, float r) {
-	return makeV3d(a.x + r*(b.x - a.x),
-	               a.y + r*(b.y - a.y),
-	               a.z + r*(b.z - a.z));
-};
-
-// RGBA
-struct RGBA
-{
-	uint8 red;
-	uint8 green;
-	uint8 blue;
-	uint8 alpha;
-};
-inline RGBA makeRGBA(uint8 r, uint8 g, uint8 b, uint8 a) { RGBA c = { r, g, b, a }; return c; }
-inline bool equal(const RGBA &c1, const RGBA &c2) { return c1.red == c2.red && c1.green == c2.green && c1.blue == c2.blue && c1.alpha == c2.alpha; }
-#define RWRGBAINT(r, g, b, a) ((uint32)((((a)&0xff)<<24)|(((b)&0xff)<<16)|(((g)&0xff)<<8)|((r)&0xff)))
-
-// V4d
-struct V4d;
+using namespace import;
 
 // Global vectors to store the scene data
 std::vector<texture_t*> textures;
@@ -509,9 +476,6 @@ std::pair<Sphere, std::vector<uint8_t>> process_mesh(mesh_t *mesh) {
 	auto texcoords = (TexCoords*)mesh->uv;
 	auto colors = (RGBA*)mesh->col;
 
-	V4d* skinWeights = nullptr;
-	uint32_t* skinIndices = nullptr;
-
 	std::vector<size_t> canonicalIdx(mesh->vertex_count, SIZE_MAX);
 	for (size_t i = 0; i < mesh->vertex_count; i++) {
 		for (size_t j = i+1; j < mesh->vertex_count; j++) {
@@ -803,8 +767,8 @@ std::pair<Sphere, std::vector<uint8_t>> process_mesh(mesh_t *mesh) {
 }
 
 int main(int argc, const char** argv) {
-    if (argc != 2) {
-        std::cout << argv[0] << " <scene.dat>" << std::endl;
+    if (argc != 3) {
+        std::cout << argv[0] << " <scene.dat> <scene.ndt>" << std::endl;
         return 1;
     }
 
@@ -814,6 +778,13 @@ int main(int argc, const char** argv) {
     mkdir("repack-data/tex-tga", 0755);
     mkdir("repack-data/tex", 0755);
     mkdir("repack-data/mesh", 0755);
+
+    auto outfile = std::ofstream(argv[2]);
+
+    outfile.write("DCUENS00", 8);
+    
+    std::vector<pvr_tex> native_textures;
+    std::vector<size_t> native_textures_map;
 
     for (auto& tex: textures) {
         hash_sha256 hash;
@@ -840,7 +811,7 @@ int main(int argc, const char** argv) {
         auto pvr_filename = ss2.str();
 
         std::cout << "Processing texture: " << pvr_filename << std::endl;
-        
+
         if (!std::filesystem::exists(pvr_filename)) {
             auto imageData = createImageFromData_ARGB8888((const uint8_t*)tex->data, tex->width, tex->height, tex->width * 4);
             auto nw = std::min(256, tex->width/2);
@@ -859,8 +830,10 @@ int main(int argc, const char** argv) {
 
             assert(res == 0);
     
-            // loadPVR(pvr_filename.c_str(), raster, natras->raster, PVR_TXRFMT_TWIDDLED | PVR_TXRFMT_VQ_ENABLE);
+            native_textures.push_back(loadPVR(pvr_filename.c_str()));
         }
+
+        native_textures_map.push_back(native_textures.size() - 1);
     }
 
     for (auto& mesh: meshes) {

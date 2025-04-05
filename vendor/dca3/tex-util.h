@@ -11,6 +11,12 @@
 #include "vq.h"
 #include "vendor/gldc/alloc.h"
 
+#include "dcue/types-native.h"
+
+#include <vector>
+
+#define texloadf(...) // printf(__VA_ARGS__)
+
 enum downsampleModes {
     NONE,
     HALF,
@@ -94,8 +100,15 @@ bool writeTGA(const char* filename, std::vector<Color> imageData, uint16_t width
     return true;
 }
 
-#if 0
-void loadPVR(char *fname, rw::Raster* raster, auto* natras, auto flags) {
+struct pvr_tex {
+    std::vector<uint8_t> data;
+    uint32_t flags;
+    uint32_t offs;
+    uint8_t lw;
+    uint8_t lh;
+};
+
+pvr_tex loadPVR(const char *fname) {
     FILE *tex = NULL;
     PVRHeader HDR;
 
@@ -105,59 +118,53 @@ void loadPVR(char *fname, rw::Raster* raster, auto* natras, auto flags) {
     /* Read in the PVR texture file header */
     fread(&HDR, 1, sizeof(PVRHeader), tex);
 
-    natras->pvr_flags = 0;
-    natras->pvr_flags |= flags;
-    natras->texoffs = 0;
+    pvr_tex rv;
+
+    rv.flags = PVR_TXRFMT_TWIDDLED | PVR_TXRFMT_VQ_ENABLE;
+    rv.offs = 0;
 
     if( memcmp( HDR.PVRT, "GBIX", 4 ) == 0 )
     {
         GlobalIndexHeader *gbixHdr = (GlobalIndexHeader*)&HDR;
-        texconvf("gbixHdr->nCodebookSize: %i\n", gbixHdr->nCodebookSize);
+        texloadf("gbixHdr->nCodebookSize: %i\n", gbixHdr->nCodebookSize);
         if(gbixHdr->nCodebookSize > 0 && gbixHdr->nCodebookSize <= MAX_VQ_CODEBOOK_SIZE)
-            natras->texoffs = (MAX_VQ_CODEBOOK_SIZE - gbixHdr->nCodebookSize) * 4 * 2;
+            rv.offs = (MAX_VQ_CODEBOOK_SIZE - gbixHdr->nCodebookSize) * 4 * 2;
         // Go Back 4 bytes and re-read teh PVR header
         fseek(tex, -4, SEEK_CUR);
         fread(&HDR, 1, sizeof(PVRHeader), tex);
     }
 
-    unsigned rasterFmt = 0;
     // VQ or small VQ
     assert(HDR.nDataFormat == 0x3 || HDR.nDataFormat == 0x10);
     switch(HDR.nPixelFormat) {
         case 0x0: // ARGB1555
-            natras->pvr_flags |= PVR_TXRFMT_ARGB1555;
-            rasterFmt = rw::Raster::C1555;
+            rv.flags |= PVR_TXRFMT_ARGB1555;
             break;
         case 0x1: // RGB565
-            natras->pvr_flags |= PVR_TXRFMT_RGB565;
-            rasterFmt = rw::Raster::C565;
+            rv.flags |= PVR_TXRFMT_RGB565;
             break;
         case 0x2: // ARGB4444
-            natras->pvr_flags |= PVR_TXRFMT_ARGB4444;
-            rasterFmt = rw::Raster::C4444;
+            rv.flags |= PVR_TXRFMT_ARGB4444;
             break;
         case 0x3: // YUV422
-            natras->pvr_flags |= PVR_TXRFMT_YUV422;
-            rasterFmt = rw::Raster::C565;  // this is a bit of a hack
+            rv.flags |= PVR_TXRFMT_YUV422;
             break;
         default:
             assert(false && "Invalid texture format");
             break;
     }
 
-    raster->format &= ~0x0F00;
-    raster->format |= rasterFmt;
-
-    natras->texsize = HDR.nTextureDataSize-16;
-    natras->texaddr = alloc_malloc(natras, natras->texsize);
-    fread(natras->texaddr, 1, natras->texsize, tex); /* Read in the PVR texture data */
-    texconvf("PVR TEXTURE READ: %ix%i, %i, %i\n", HDR.nWidth, HDR.nHeight, natras->texoffs, natras->texsize);
-    if (natras->texsize >= 256) {
-        assert((natras->texsize & 255) == 0);
+    rv.data.resize(HDR.nTextureDataSize-16);
+    
+    fread(rv.data.data(), 1, rv.data.size(), tex); /* Read in the PVR texture data */
+    texloadf("PVR TEXTURE READ: %ix%i, %i, %i\n", HDR.nWidth, HDR.nHeight, rv.offs, rv.data.size());
+    if (rv.data.size() >= 256) {
+        assert((rv.data.size() & 255) == 0);
     } else {
-        assert((natras->texsize & 31) == 0);
+        assert((rv.data.size() & 31) == 0);
     }
 
     fclose(tex);
+
+    return rv;
 }
-#endif
