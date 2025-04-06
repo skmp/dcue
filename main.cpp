@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cassert>
 #include <cstring>
+#include <chrono>
 
 #define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
 
@@ -1729,7 +1730,7 @@ static void (*clipAndsubmitMeshletSelectorFallback[2])(uint8_t* OCR, const int8_
 RGBAf ambLight = { 0.4f, 0.4f, 0.4f, 1.0f };
 float ambient = 1.0f;
 RGBAf diffuseLight = { 0.8f, 0.8f, 0.8f, 1.0f };
-float diffuse = 1.0f;
+float diffuse = 0.5f;
 r_matrix_t diffusePos { 
     1, 0, 0, 0,
     0, 0.7071068, 0.7071068, 0,
@@ -1790,44 +1791,35 @@ struct Camera {
 
         /* Far plane */
         p[0].normal = go->ltw.at;
-		p[0].normal.y = -p[0].normal.y;
         p[0].distance = dot(p[0].normal, c[4]);
 
         /* Near plane */
         p[1].normal = neg(p[0].normal);
         p[1].distance = dot(p[1].normal, c[0]);
 
-        /* Right plane */
-        p[2].normal = normalize(cross(v51,
-                                            sub(c[6], c[5])));
+        /* Right plane: swapped operands */
+        p[2].normal = normalize(cross(sub(c[6], c[5]), v51));
         p[2].distance = dot(p[2].normal, c[1]);
 
-        /* Top plane */
-        p[3].normal = normalize(cross(sub(c[4], c[5]),
-                                            v51));
+        /* Top plane: swapped operands */
+        p[3].normal = normalize(cross(v51, sub(c[4], c[5])));
         p[3].distance = dot(p[3].normal, c[1]);
 
-        /* Left plane */
-        p[4].normal = normalize(cross(v73,
-                                            sub(c[4], c[7])));
+        /* Left plane: swapped operands */
+        p[4].normal = normalize(cross(sub(c[4], c[7]), v73));
         p[4].distance = dot(p[4].normal, c[3]);
 
-        /* Bottom plane */
-        p[5].normal = normalize(cross(sub(c[6], c[7]),
-                                            v73));
+        /* Bottom plane: swapped operands */
+        p[5].normal = normalize(cross(v73, sub(c[6], c[7])));
         p[5].distance = dot(p[5].normal, c[3]);
     }
 
     void buildClipPersp()
     {
 		V3d ltw_up = go->ltw.up;
-		ltw_up.y *= -1;
 		V3d ltw_right = go->ltw.right;
-		ltw_right.y *= -1;
 		V3d ltw_at = go->ltw.at;
-		ltw_at.y *= -1;
 		V3d ltw_pos = go->ltw.pos;
-		ltw_pos.y *= -1;
 
         /* First we calculate the 4 points on the view window. */
 		V3d up = scale(ltw_up, viewWindow.y);
@@ -2021,6 +2013,22 @@ void renderMesh(Camera* cam, game_object_t* go) {
     if (vertexBufferFree() < freeVertexTarget) {
         return;
     }
+    bool global_needsNoClip = false;
+
+	mat_load((matrix_t*)&go->ltw);
+	Sphere sphere = go->mesh->bounding_sphere;
+	float w;
+	mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
+    auto global_visible = cam->frustumTestSphereNear(&sphere);
+    if (global_visible == Camera::SPHEREOUTSIDE) {
+        // printf("Outside frustum cull (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
+        return;
+    } else if (global_visible == Camera::SPHEREINSIDE) {
+        global_needsNoClip = true;
+    } else {
+        // printf("Needs local clip (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
+    }
+    global_needsNoClip = false;
 
     pvr_poly_hdr_t hdr;
     bool textured = go->material->texture != nullptr;
@@ -2109,20 +2117,6 @@ void renderMesh(Camera* cam, game_object_t* go) {
         lightDiffuseColors[i].red = material.red * uniformObject.col[i].red * diffuse;
         lightDiffuseColors[i].green = material.green * uniformObject.col[i].green * diffuse;
         lightDiffuseColors[i].blue = material.blue * uniformObject.col[i].blue * diffuse;
-    }
-
-    bool global_needsNoClip = false;
-
-	mat_load((matrix_t*)&go->ltw);
-	Sphere sphere = go->mesh->bounding_sphere;
-	float w;
-	mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
-    auto global_visible = cam->frustumTestSphereNear(&sphere);
-    if (global_visible == Camera::SPHEREOUTSIDE) {
-        // printf("Outside frustum cull (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
-        return;
-    } else if (global_visible == Camera::SPHEREINSIDE) {
-        global_needsNoClip = true;
     }
 
     for (unsigned meshletNum = 0; meshletNum < meshInfo->meshletCount; meshletNum++) {
@@ -2286,8 +2280,6 @@ int main(int argc, const char** argv) {
     cam.nearPlane = 0.1f;
     cam.farPlane = 1000.0f;
 
-    cam.buildClipPersp();
-
 	#if defined(DC_SH4)
 	OCR_SPACE = (uint8_t*)0x92000000;
 
@@ -2315,7 +2307,14 @@ int main(int argc, const char** argv) {
 	}
 	#endif
 
+    auto tp_last_frame = std::chrono::system_clock::now();
     for(;;) {
+
+        auto tp_this_frame = std::chrono::system_clock::now();
+        
+        auto deltaTime = std::chrono::duration_cast<std::chrono::duration<float>>(tp_this_frame - tp_last_frame).count();
+        tp_last_frame = tp_this_frame;
+        // printf("Delta time: %f\n", deltaTime);
         // get input
         auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
         if (contMaple) {
@@ -2331,9 +2330,9 @@ int main(int argc, const char** argv) {
                 float x_dir = 0;
 
                 if (state->joyy > 64) {
-                    x_dir = -1;
+                    x_dir = -5 * deltaTime;
                 } else if (state->joyy < -64) {
-                    x_dir = 1;
+                    x_dir = 5 * deltaTime;
                 }
 
                 matrix_t translation_matrix = {
@@ -2346,9 +2345,9 @@ int main(int argc, const char** argv) {
 				float y_rot = 0;
 
 				if (state->joyx > 64) {
-					y_rot = 10.0f * (3.1415f / 180.0f); // Convert degrees to radians
+					y_rot = 80.0f * (3.1415f / 180.0f) * deltaTime; // Convert degrees to radians
 				} else if (state->joyx < -64) {
-					y_rot = -10.0f * (3.1415f / 180.0f); // Convert degrees to radians
+					y_rot = -80.0f * (3.1415f / 180.0f) * deltaTime; // Convert degrees to radians
 				}
 
                 matrix_t rotation_matrix = {
