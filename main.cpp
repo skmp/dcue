@@ -2340,8 +2340,8 @@ int main(int argc, const char** argv) {
     float camX = 16317.f, camY = 2.f, camZ = 8539.f;
     float yaw = 0.0f, pitch = 0.0f;
 
-    const float moveSpeed = 5.f;
-    const float rotateSpeed = 10.f;
+    const float moveSpeed = 2.f;
+    const float rotateSpeed = 45.f / 127;
 
     cam.setFOV(45.0f, 4.0f / 3.0f);
     cam.nearPlane = 0.1f;
@@ -2407,19 +2407,19 @@ int main(int argc, const char** argv) {
                 float rightX = cos(radYaw);
                 float rightZ = sin(radYaw);
                 
-                if (state->dpad_right) {
+                if (state->x) {
                     camX -= rightX * moveSpeed;
                     camZ -= rightZ * moveSpeed;
-                } else if (state->dpad_left) {
+                } else if (state->b) {
                     camX += rightX * moveSpeed;
                     camZ += rightZ * moveSpeed;
                 }
 
-                if (state->dpad_down) {
+                if (state->a) {
                     camX += forwardX * moveSpeed;
                     camY += forwardY * moveSpeed;
                     camZ += forwardZ * moveSpeed;
-                } else if (state->dpad_up) {
+                } else if (state->y) {
                     camX -= forwardX * moveSpeed;
                     camY -= forwardY * moveSpeed;
                     camZ -= forwardZ * moveSpeed;
@@ -2432,12 +2432,11 @@ int main(int argc, const char** argv) {
                     { camX, camY, camZ, 1 },
                 };
 
-				mat_load(&translation_matrix);
 
                 matrix_t rotation_matrix_yaw = {
-                    { cosf(radYaw), 0, -sinf(radYaw), 0 },
+                    { cosf(-radYaw), 0, -sinf(-radYaw), 0 },
                     { 0, 1, 0, 0 },
-                    { sinf(radYaw), 0, cosf(radYaw), 0 },
+                    { sinf(-radYaw), 0, cosf(-radYaw), 0 },
                     { 0, 0, 0, 1 },
                 };
 
@@ -2447,7 +2446,8 @@ int main(int argc, const char** argv) {
                     { 0, -sinf(radPitch), cosf(radPitch), 0 },
                     { 0, 0, 0, 1 },
                 };
-				mat_apply(&rotation_matrix_yaw);
+				mat_load(&translation_matrix);
+                mat_apply(&rotation_matrix_yaw);
                 mat_apply(&rotation_matrix_pitch);
                 
                 mat_store((matrix_t*)&cam.go->ltw);
