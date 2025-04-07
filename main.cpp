@@ -1727,14 +1727,14 @@ static void (*clipAndsubmitMeshletSelectorFallback[2])(uint8_t* OCR, const int8_
 	&clipAndsubmitMeshletFallback<true>,
 };
 
-RGBAf ambLight = { 0.4f, 0.4f, 0.4f, 1.0f };
+RGBAf ambLight = { 0.7f, 0.7f, 0.7f, 1.0f };
 float ambient = 1.0f;
 RGBAf diffuseLight = { 0.8f, 0.8f, 0.8f, 1.0f };
 float diffuse = 0.5f;
 r_matrix_t diffusePos { 
     1, 0, 0, 0,
+    0, 0.7071068, -0.7071068, 0,
     0, 0.7071068, 0.7071068, 0,
-    0, -0.7071068, 0.7071068, 0,
     0, 3, 0, 1
 };
 
@@ -1797,48 +1797,47 @@ struct Camera {
         p[1].normal = neg(p[0].normal);
         p[1].distance = dot(p[1].normal, c[0]);
 
-        /* Right plane: swapped operands */
-        p[2].normal = normalize(cross(sub(c[6], c[5]), v51));
+        /* Right plane */
+        p[2].normal = normalize(cross(v51,
+                                            sub(c[6], c[5])));
         p[2].distance = dot(p[2].normal, c[1]);
 
-        /* Top plane: swapped operands */
-        p[3].normal = normalize(cross(v51, sub(c[4], c[5])));
+        /* Top plane */
+        p[3].normal = normalize(cross(sub(c[4], c[5]),
+                                            v51));
         p[3].distance = dot(p[3].normal, c[1]);
 
-        /* Left plane: swapped operands */
-        p[4].normal = normalize(cross(sub(c[4], c[7]), v73));
+        /* Left plane */
+        p[4].normal = normalize(cross(v73,
+                                            sub(c[4], c[7])));
         p[4].distance = dot(p[4].normal, c[3]);
 
-        /* Bottom plane: swapped operands */
-        p[5].normal = normalize(cross(v73, sub(c[6], c[7])));
+        /* Bottom plane */
+        p[5].normal = normalize(cross(sub(c[6], c[7]),
+                                            v73));
         p[5].distance = dot(p[5].normal, c[3]);
     }
 
     void buildClipPersp()
     {
-		V3d ltw_up = go->ltw.up;
-		V3d ltw_right = go->ltw.right;
-		V3d ltw_at = go->ltw.at;
-		V3d ltw_pos = go->ltw.pos;
-
         /* First we calculate the 4 points on the view window. */
-		V3d up = scale(ltw_up, viewWindow.y);
-		V3d left = scale(ltw_right, viewWindow.x);
-		V3d *c = frustumCorners;
-		c[0] = add(add(ltw_at, up), left);	// top left
-		c[1] = sub(add(ltw_at, up), left);	// top right
-		c[2] = sub(sub(ltw_at, up), left);	// bottom right
-		c[3] = add(sub(ltw_at, up), left);	// bottom left
+        V3d up = scale(go->ltw.up, viewWindow.y);
+        V3d left = scale(go->ltw.right, viewWindow.x);
+        V3d *c = frustumCorners;
+        c[0] = add(add(go->ltw.at, up), left);	// top left
+        c[1] = sub(add(go->ltw.at, up), left);	// top right
+        c[2] = sub(sub(go->ltw.at, up), left);	// bottom right
+        c[3] = add(sub(go->ltw.at, up), left);	// bottom left
 
-		/* Now Calculate near and far corners. */
-		V3d off = sub(scale(ltw_up, viewOffset.y),
-					scale(ltw_right, viewOffset.x));
-		for(int32 i = 0; i < 4; i++){
-			V3d corner = sub(frustumCorners[i], off);
-			V3d pos = add(ltw_pos, off);
-			c[i] = add(scale(corner, nearPlane), pos);
-			c[i+4] = add(scale(corner, farPlane), pos);
-		}
+        /* Now Calculate near and far corners. */
+        V3d off = sub(scale(go->ltw.up, viewOffset.y),
+                    scale(go->ltw.right, viewOffset.x));
+        for(int32 i = 0; i < 4; i++){
+            V3d corner = sub(frustumCorners[i], off);
+            V3d pos = add(go->ltw.pos, off);
+            c[i] = add(scale(corner, nearPlane), pos);
+            c[i+4] = add(scale(corner, farPlane), pos);
+        }
 
 		buildPlanes();
     }
@@ -1936,6 +1935,21 @@ struct Camera {
     
     enum { SPHEREOUTSIDE, SPHEREBOUNDARY, SPHEREINSIDE, SPHEREBOUNDARY_NEAR /* frustumTestSphereEx only */};
 
+    int frustumTestSphere(const Sphere *s) const
+    {
+        int res = SPHEREINSIDE;
+        const Plane *p = this->frustumPlanes;
+        for(int32 i = 0; i < 6; i++){
+            float dist = dot(p->normal, s->center) - p->distance;
+            if(s->radius < dist)
+                return SPHEREOUTSIDE;
+            if(s->radius > -dist)
+                res = SPHEREBOUNDARY;
+            p++;
+        }
+        return res;
+    }
+
     int frustumTestSphereNear(const Sphere *s) const
     {
         int res = SPHEREINSIDE;
@@ -2007,6 +2021,23 @@ struct alignas(8) UniformObject
 	int lightCount;
 };
 
+float GetMaxScale(const r_matrix_t& mat) {
+    // Compute the scale factors for each axis
+    float scaleRight = std::sqrt(mat.right.x * mat.right.x +
+                                 mat.right.y * mat.right.y +
+                                 mat.right.z * mat.right.z);
+
+    float scaleUp = std::sqrt(mat.up.x * mat.up.x +
+                              mat.up.y * mat.up.y +
+                              mat.up.z * mat.up.z);
+
+    float scaleAt = std::sqrt(mat.at.x * mat.at.x +
+                              mat.at.y * mat.at.y +
+                              mat.at.z * mat.at.z);
+
+    // Return the maximum scale factor
+    return std::max({scaleRight, scaleUp, scaleAt});
+}
 
 template<int list>
 void renderMesh(Camera* cam, game_object_t* go) {
@@ -2019,6 +2050,8 @@ void renderMesh(Camera* cam, game_object_t* go) {
 	Sphere sphere = go->mesh->bounding_sphere;
 	float w;
 	mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
+    float maxScaleFactor = GetMaxScale(go->ltw);
+    sphere.radius *= maxScaleFactor;
     auto global_visible = cam->frustumTestSphereNear(&sphere);
     if (global_visible == Camera::SPHEREOUTSIDE) {
         // printf("Outside frustum cull (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
@@ -2028,7 +2061,6 @@ void renderMesh(Camera* cam, game_object_t* go) {
     } else {
         // printf("Needs local clip (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
     }
-    global_needsNoClip = false;
 
     pvr_poly_hdr_t hdr;
     bool textured = go->material->texture != nullptr;
@@ -2057,7 +2089,7 @@ void renderMesh(Camera* cam, game_object_t* go) {
             list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
             PVR_DEPTHCMP_GREATER,
             PVR_DEPTHWRITE_ENABLE,
-            PVR_CULLING_CCW,
+            PVR_CULLING_SMALL,
             PVR_FOG_DISABLE
         );
     } else {
@@ -2070,7 +2102,7 @@ void renderMesh(Camera* cam, game_object_t* go) {
             list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
             PVR_DEPTHCMP_GREATER,
             PVR_DEPTHWRITE_ENABLE,
-            PVR_CULLING_CCW,
+            PVR_CULLING_SMALL,
             PVR_FOG_DISABLE
         );
     }
@@ -2130,7 +2162,7 @@ void renderMesh(Camera* cam, game_object_t* go) {
 			mat_load((matrix_t*)&go->ltw);
 			float w;
 			mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
-			
+			sphere.radius *= maxScaleFactor;
 			auto local_frustumTestResult = cam->frustumTestSphereNear(&sphere);
 			if ( local_frustumTestResult == Camera::SPHEREOUTSIDE) {
 				// printf("Outside local frustum cull\n");
@@ -2140,7 +2172,6 @@ void renderMesh(Camera* cam, game_object_t* go) {
 			if (local_frustumTestResult == Camera::SPHEREBOUNDARY_NEAR) {
 				clippingRequired = 1 + textured;
 			}
-			// clippingRequired = 1 + textured;
         }
 
         //isTextured, isNormaled, isColored, small_xyz, pad_xyz, small_uv
@@ -2247,7 +2278,7 @@ int main(int argc, const char** argv) {
 		pvr_params.vertex_buf_size = (1024 + 768) * 1024;
 		pvr_params.opb_overflow_count = 4; // 307200 bytes
 	} else {
-		pvr_params.vertex_buf_size = (1024 + 1024) * 1024;
+		pvr_params.vertex_buf_size = (1024 + 512) * 1024;
 		pvr_params.opb_overflow_count = 7; // 268800 bytes
 	}
 
@@ -2269,12 +2300,24 @@ int main(int argc, const char** argv) {
 
     Camera cam;
     cam.go = new game_object_t();
+    // cam.go->ltw = r_matrix_t {
+    //     -0.198809, 0.000000, 0.980038, 0.000000,
+    //     0, 1, 0, 0,
+    //     -0.980038, 0, -0.198809, 0,
+    //     24571, 4.27, 8699, 1.000000
+    // };
     cam.go->ltw = r_matrix_t {
         -0.198809, 0.000000, 0.980038, 0.000000,
         0, 1, 0, 0,
         -0.980038, 0, -0.198809, 0,
-        0.098792, 2.450000, -10.487000, 1.000000
+        16317, 2, 8539, 1.000000
     };
+    // cam.go->ltw = r_matrix_t {
+    //     -0.198809, 0.000000, 0.980038, 0.000000,
+    //     0, 1, 0, 0,
+    //     -0.980038, 0, -0.198809, 0,
+    //     0, 0, 0, 1.000000
+    // };
 
     cam.setFOV(45.0f, 4.0f / 3.0f);
     cam.nearPlane = 0.1f;
@@ -2328,38 +2371,48 @@ int main(int argc, const char** argv) {
                 mat_load((matrix_t*)&cam.go->ltw);
 
                 float x_dir = 0;
+                float z_dir = 0;
 
-                if (state->joyy > 64) {
-                    x_dir = -5 * deltaTime;
-                } else if (state->joyy < -64) {
-                    x_dir = 5 * deltaTime;
+                if (state->dpad_right) {
+                    x_dir = -25 * deltaTime;
+                } else if (state->dpad_left) {
+                    x_dir = 25 * deltaTime;
+                }
+
+                if (state->dpad_down) {
+                    z_dir = -25 * deltaTime;
+                } else if (state->dpad_up) {
+                    z_dir = 25 * deltaTime;
                 }
 
                 matrix_t translation_matrix = {
                     { 1, 0, 0, 0 },
                     { 0, 1, 0, 0 },
                     { 0, 0, 1, 0 },
-                    { x_dir, 0, 0, 1 },
+                    { x_dir, 0, z_dir, 1 },
                 };
 
-				float y_rot = 0;
+                float y_rot = -state->joyx * (3.1415f / 180.0f) * deltaTime; // Convert degrees to radians
+                float x_rot = state->joyy * (3.1415f / 180.0f) * deltaTime; // Convert degrees to radians
 
-				if (state->joyx > 64) {
-					y_rot = 80.0f * (3.1415f / 180.0f) * deltaTime; // Convert degrees to radians
-				} else if (state->joyx < -64) {
-					y_rot = -80.0f * (3.1415f / 180.0f) * deltaTime; // Convert degrees to radians
-				}
-
-                matrix_t rotation_matrix = {
+                matrix_t rotation_matrix_y = {
                     { cosf(y_rot), 0, -sinf(y_rot), 0 },
                     { 0, 1, 0, 0 },
                     { sinf(y_rot), 0, cosf(y_rot), 0 },
                     { 0, 0, 0, 1 },
                 };
 
-                mat_apply(&rotation_matrix);
+                matrix_t rotation_matrix_x = {
+                    { 1, 0, 0, 0 },
+                    { 0, cosf(x_rot), sinf(x_rot), 0 },
+                    { 0, -sinf(x_rot), cosf(x_rot), 0 },
+                    { 0, 0, 0, 1 },
+                };
+
+				mat_apply(&translation_matrix);
+                mat_apply(&rotation_matrix_x);
+				mat_apply(&rotation_matrix_y);
                 
-                mat_apply(&translation_matrix);
                 mat_store((matrix_t*)&cam.go->ltw);
             }
         }
