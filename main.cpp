@@ -181,6 +181,7 @@ static pvr_init_params_t pvr_params = {
 
 std::vector<texture_t*> textures;
 std::vector<material_t*> materials;
+std::vector<material_t**> material_groups;
 std::vector<mesh_t*> meshes;
 std::vector<game_object_t*> gameObjects;
 
@@ -194,7 +195,7 @@ bool loadScene(const char* scene) {
     // Read and verify header (8 bytes)
     char header[9] = { 0};
     in.read(header, 8);
-    if (strncmp(header, "DCUENS00", 8) != 0) {
+    if (strncmp(header, "DCUENS01", 8) != 0) {
         std::cout << "Invalid file header: " << header << std::endl;
         return false;
     }
@@ -266,12 +267,24 @@ bool loadScene(const char* scene) {
             go->mesh = nullptr;
         }
         in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp));
-        if (tmp != UINT32_MAX) {
-            assert(tmp < materials.size());
-            go->material = materials[tmp];
+        auto submesh_count = tmp;
+        if (submesh_count != 0) {
+            auto materials_group = new material_t*[submesh_count];
+            material_groups.push_back(materials_group);
+            go->materials = materials_group;
+            for (int materialNum = 0; materialNum < submesh_count; materialNum++) {
+                in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp));
+                if (tmp != UINT32_MAX) {
+                    assert(tmp < materials.size());
+                    go->materials[materialNum] = materials[tmp];
+                } else {
+                    go->materials[materialNum] = nullptr;
+                }
+            }
         } else {
-            go->material = nullptr;
+            go->materials = nullptr;
         }
+        go->submesh_count = submesh_count;
     }
 
     in.close();
@@ -2062,69 +2075,6 @@ void renderMesh(Camera* cam, game_object_t* go) {
         // printf("Needs local clip (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
     }
 
-    pvr_poly_hdr_t hdr;
-    bool textured = go->material->texture != nullptr;
-
-    if (go->material->texture) {
-        pvr_poly_cxt_txr_fast(
-            &hdr,
-            list,
-
-            go->material->texture->flags,
-            go->material->texture->lw,
-            go->material->texture->lh,
-            (uint8_t*)go->material->texture->data - go->material->texture->offs,
-
-            PVR_FILTER_BILINEAR,
-
-            // flip_u, clamp_u, flip_v, clamp_v,
-            PVR_UVFLIP_NONE,
-            PVR_UVCLAMP_NONE,
-            PVR_UVFLIP_NONE,
-            PVR_UVCLAMP_NONE,
-            PVR_UVFMT_16BIT,
-
-            PVR_CLRFMT_4FLOATS,
-            list != PVR_LIST_OP_POLY ? PVR_BLEND_SRCALPHA : PVR_BLEND_ONE,
-            list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
-            PVR_DEPTHCMP_GREATER,
-            PVR_DEPTHWRITE_ENABLE,
-            PVR_CULLING_SMALL,
-            PVR_FOG_DISABLE
-        );
-    } else {
-        pvr_poly_cxt_col_fast(
-            &hdr,
-            list,
-
-            PVR_CLRFMT_4FLOATS,
-            list != PVR_LIST_OP_POLY ? PVR_BLEND_SRCALPHA : PVR_BLEND_ONE,
-            list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
-            PVR_DEPTHCMP_GREATER,
-            PVR_DEPTHWRITE_ENABLE,
-            PVR_CULLING_SMALL,
-            PVR_FOG_DISABLE
-        );
-    }
-
-    pvr_prim(&hdr, sizeof(hdr));
-
-    RGBAf residual, material;
-    // Ambient Alpha ALWAYS = 1.0
-    residual.alpha = go->material->color.alpha;
-    residual.red = ambLight.red * ambient * go->material->color.red;
-    residual.green = ambLight.green * ambient * go->material->color.green;
-    residual.blue = ambLight.blue * ambient * go->material->color.blue;
-    material.alpha = go->material->color.alpha;
-    material.red = (1.0f / 255.0f) * go->material->color.red;
-    material.green = (1.0f / 255.0f) * go->material->color.green;
-    material.blue = (1.0f / 255.0f) * go->material->color.blue;
-
-    const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
-    auto meshletInfoBytes = &go->mesh->data[meshInfo->meshletOffset];
-
-    RGBAf lightDiffuseColors[MAX_LIGHTS];
-
     auto cntDiffuse = 1;
     r_matrix_t invLtw;
     invertGeneral(&invLtw, &go->ltw);
@@ -2145,124 +2095,192 @@ void renderMesh(Camera* cam, game_object_t* go) {
         uniformObject.dir[n>>2][3][n&3] = 0;
     }
 
-    for (unsigned i = 0; i < cntDiffuse; i++) {
-        lightDiffuseColors[i].red = material.red * uniformObject.col[i].red * diffuse;
-        lightDiffuseColors[i].green = material.green * uniformObject.col[i].green * diffuse;
-        lightDiffuseColors[i].blue = material.blue * uniformObject.col[i].blue * diffuse;
-    }
+    const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
 
-    for (unsigned meshletNum = 0; meshletNum < meshInfo->meshletCount; meshletNum++) {
-        auto meshlet = (const MeshletInfo*)meshletInfoBytes;
-        meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
+    for (int submesh_num = 0; submesh_num < go->submesh_count; submesh_num++) {
 
-        unsigned clippingRequired = 0;
+        pvr_poly_hdr_t hdr;
+        bool textured = go->materials[submesh_num]->texture != nullptr;
 
-        if (!global_needsNoClip) {
-			Sphere sphere = meshlet->boundingSphere;
-			mat_load((matrix_t*)&go->ltw);
-			float w;
-			mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
-			sphere.radius *= maxScaleFactor;
-			auto local_frustumTestResult = cam->frustumTestSphereNear(&sphere);
-			if ( local_frustumTestResult == Camera::SPHEREOUTSIDE) {
-				// printf("Outside local frustum cull\n");
-				continue;
-			}
+        if (go->materials[submesh_num]->texture) {
+            pvr_poly_cxt_txr_fast(
+                &hdr,
+                list,
 
-			if (local_frustumTestResult == Camera::SPHEREBOUNDARY_NEAR) {
-				clippingRequired = 1 + textured;
-			}
-        }
+                go->materials[submesh_num]->texture->flags,
+                go->materials[submesh_num]->texture->lw,
+                go->materials[submesh_num]->texture->lh,
+                (uint8_t*)go->materials[submesh_num]->texture->data - go->materials[submesh_num]->texture->offs,
 
-        //isTextured, isNormaled, isColored, small_xyz, pad_xyz, small_uv
-        unsigned selector = meshlet->flags;
+                PVR_FILTER_BILINEAR,
 
-        // template<bool hasTexture, bool small_xyz, bool forClip>
-        unsigned smallSelector = ((selector & 8) ? 1 : 0) | clippingRequired * 2;
+                // flip_u, clamp_u, flip_v, clamp_v,
+                PVR_UVFLIP_NONE,
+                PVR_UVCLAMP_NONE,
+                PVR_UVFLIP_NONE,
+                PVR_UVCLAMP_NONE,
+                PVR_UVFMT_16BIT,
 
-        dce_set_mat_decode(
-            meshlet->boundingSphere.radius / 32767.0f,
-            meshlet->boundingSphere.center.x,
-            meshlet->boundingSphere.center.y,
-            meshlet->boundingSphere.center.z
-        );
-
-        {
-
-            mat_load(&cam->devViewProjScreen);
-            mat_apply((matrix_t*)&go->ltw);
-
-            if (selector & 8) {
-                // mat_load(&mtx);
-                mat_apply(&DCE_MESHLET_MAT_DECODE);
-            } else {
-                // mat_load(&mtx);
-            }
-            tnlMeshletTransformSelector[smallSelector](OCR_SPACE, &go->mesh->data[meshlet->vertexOffset], meshlet->vertexCount, meshlet->vertexSize);
-        }
-
-        if (textured) {
-            unsigned uvOffset = (selector & 8) ? (3 * 2) : (3 * 4);
-            if (selector & 16) {
-                uvOffset += 1 * 2;
-            }
-
-            unsigned small_uv = (selector & 32) ? 1 : 0;
-            tnlMeshletCopyUVsSelector[small_uv](OCR_SPACE, &go->mesh->data[meshlet->vertexOffset] + uvOffset, meshlet->vertexCount, meshlet->vertexSize);
-        }
-
-        if (selector & 4) {
-            unsigned colOffset = (selector & 8) ? (3 * 2) : (3 * 4);
-            if (selector & 16) {
-                colOffset += 1 * 2;
-            }
-
-            colOffset += (selector & 32) ? 2 : 4;
-
-            colOffset += (selector & 2) ? 4 : 0;
-
-            unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
-            dce_set_mat_vertex_color(&residual, &material);
-            mat_load(&DCE_MESHLET_MAT_VERTEX_COLOR);
-            tnlMeshletVertexColorSelector[0](OCR_SPACE + dstColOffset, (int8_t*)&go->mesh->data[meshlet->vertexOffset] + colOffset, meshlet->vertexCount, meshlet->vertexSize);
+                PVR_CLRFMT_4FLOATS,
+                list != PVR_LIST_OP_POLY ? PVR_BLEND_SRCALPHA : PVR_BLEND_ONE,
+                list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
+                PVR_DEPTHCMP_GREATER,
+                PVR_DEPTHWRITE_ENABLE,
+                PVR_CULLING_SMALL,
+                PVR_FOG_DISABLE
+            );
         } else {
-            unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
-            tnlMeshletFillResidualSelector[0](OCR_SPACE + dstColOffset, meshlet->vertexCount, &residual);
+            pvr_poly_cxt_col_fast(
+                &hdr,
+                list,
+
+                PVR_CLRFMT_4FLOATS,
+                list != PVR_LIST_OP_POLY ? PVR_BLEND_SRCALPHA : PVR_BLEND_ONE,
+                list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
+                PVR_DEPTHCMP_GREATER,
+                PVR_DEPTHWRITE_ENABLE,
+                PVR_CULLING_SMALL,
+                PVR_FOG_DISABLE
+            );
         }
 
-        if (cntDiffuse) {
-            unsigned normalOffset = (selector & 8) ? (3 * 2) : (3 * 4);
-            if (selector & 16) {
-                normalOffset += 1 * 2;
-            }
+        pvr_prim(&hdr, sizeof(hdr));
 
-            normalOffset += (selector & 32) ? 2 : 4;
+        RGBAf residual, material;
+        // Ambient Alpha ALWAYS = 1.0
+        residual.alpha = go->materials[submesh_num]->color.alpha;
+        residual.red = ambLight.red * ambient * go->materials[submesh_num]->color.red;
+        residual.green = ambLight.green * ambient * go->materials[submesh_num]->color.green;
+        residual.blue = ambLight.blue * ambient * go->materials[submesh_num]->color.blue;
+        material.alpha = go->materials[submesh_num]->color.alpha;
+        material.red = (1.0f / 255.0f) * go->materials[submesh_num]->color.red;
+        material.green = (1.0f / 255.0f) * go->materials[submesh_num]->color.green;
+        material.blue = (1.0f / 255.0f) * go->materials[submesh_num]->color.blue;
 
-            unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
 
-            unsigned pass1 = cntDiffuse > 4? 4 : cntDiffuse;
-            unsigned pass2 = cntDiffuse > 4 ? cntDiffuse - 4 : 0;
+        RGBAf lightDiffuseColors[MAX_LIGHTS];
 
-            
-            unsigned normalSelector = (pass1 - 1);
-            mat_load((matrix_t*)&uniformObject.dir[0][0][0]);
-            auto normalPointer = &go->mesh->data[meshlet->vertexOffset] + normalOffset;
-            auto vtxSize = meshlet->vertexSize;
-            tnlMeshletDiffuseColorSelector[normalSelector](OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, &lightDiffuseColors[0]);
+        for (unsigned i = 0; i < cntDiffuse; i++) {
+            lightDiffuseColors[i].red = material.red * uniformObject.col[i].red * diffuse;
+            lightDiffuseColors[i].green = material.green * uniformObject.col[i].green * diffuse;
+            lightDiffuseColors[i].blue = material.blue * uniformObject.col[i].blue * diffuse;
+        }
+
+        auto meshletInfoBytes = &go->mesh->data[meshInfo[submesh_num].meshletOffset];
         
-            if (pass2) {
-                unsigned normalSelector = (pass2 - 1);
-                mat_load((matrix_t*)&uniformObject.dir[1][0][0]);
-                tnlMeshletDiffuseColorSelector[normalSelector](OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, &lightDiffuseColors[4]);
+        for (unsigned meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
+            auto meshlet = (const MeshletInfo*)meshletInfoBytes;
+            meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
+
+            unsigned clippingRequired = 0;
+
+            if (!global_needsNoClip) {
+                Sphere sphere = meshlet->boundingSphere;
+                mat_load((matrix_t*)&go->ltw);
+                float w;
+                mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
+                sphere.radius *= maxScaleFactor;
+                auto local_frustumTestResult = cam->frustumTestSphereNear(&sphere);
+                if ( local_frustumTestResult == Camera::SPHEREOUTSIDE) {
+                    // printf("Outside local frustum cull\n");
+                    continue;
+                }
+
+                if (local_frustumTestResult == Camera::SPHEREBOUNDARY_NEAR) {
+                    clippingRequired = 1 + textured;
+                }
             }
-        }
 
-        auto indexData = (int8_t*)&go->mesh->data[meshlet->indexOffset];
+            //isTextured, isNormaled, isColored, small_xyz, pad_xyz, small_uv
+            unsigned selector = meshlet->flags;
 
-        if (!clippingRequired) {
-            submitMeshletSelector[textured](OCR_SPACE, indexData, meshlet->indexCount);
-        } else {
-            clipAndsubmitMeshletSelector[textured](OCR_SPACE, indexData, meshlet->indexCount);
+            // template<bool hasTexture, bool small_xyz, bool forClip>
+            unsigned smallSelector = ((selector & 8) ? 1 : 0) | clippingRequired * 2;
+
+            dce_set_mat_decode(
+                meshlet->boundingSphere.radius / 32767.0f,
+                meshlet->boundingSphere.center.x,
+                meshlet->boundingSphere.center.y,
+                meshlet->boundingSphere.center.z
+            );
+
+            {
+
+                mat_load(&cam->devViewProjScreen);
+                mat_apply((matrix_t*)&go->ltw);
+
+                if (selector & 8) {
+                    // mat_load(&mtx);
+                    mat_apply(&DCE_MESHLET_MAT_DECODE);
+                } else {
+                    // mat_load(&mtx);
+                }
+                tnlMeshletTransformSelector[smallSelector](OCR_SPACE, &go->mesh->data[meshlet->vertexOffset], meshlet->vertexCount, meshlet->vertexSize);
+            }
+
+            if (textured) {
+                unsigned uvOffset = (selector & 8) ? (3 * 2) : (3 * 4);
+                if (selector & 16) {
+                    uvOffset += 1 * 2;
+                }
+
+                unsigned small_uv = (selector & 32) ? 1 : 0;
+                tnlMeshletCopyUVsSelector[small_uv](OCR_SPACE, &go->mesh->data[meshlet->vertexOffset] + uvOffset, meshlet->vertexCount, meshlet->vertexSize);
+            }
+
+            if (selector & 4) {
+                unsigned colOffset = (selector & 8) ? (3 * 2) : (3 * 4);
+                if (selector & 16) {
+                    colOffset += 1 * 2;
+                }
+
+                colOffset += (selector & 32) ? 2 : 4;
+
+                colOffset += (selector & 2) ? 4 : 0;
+
+                unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
+                dce_set_mat_vertex_color(&residual, &material);
+                mat_load(&DCE_MESHLET_MAT_VERTEX_COLOR);
+                tnlMeshletVertexColorSelector[0](OCR_SPACE + dstColOffset, (int8_t*)&go->mesh->data[meshlet->vertexOffset] + colOffset, meshlet->vertexCount, meshlet->vertexSize);
+            } else {
+                unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
+                tnlMeshletFillResidualSelector[0](OCR_SPACE + dstColOffset, meshlet->vertexCount, &residual);
+            }
+
+            if (cntDiffuse) {
+                unsigned normalOffset = (selector & 8) ? (3 * 2) : (3 * 4);
+                if (selector & 16) {
+                    normalOffset += 1 * 2;
+                }
+
+                normalOffset += (selector & 32) ? 2 : 4;
+
+                unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
+
+                unsigned pass1 = cntDiffuse > 4? 4 : cntDiffuse;
+                unsigned pass2 = cntDiffuse > 4 ? cntDiffuse - 4 : 0;
+
+                
+                unsigned normalSelector = (pass1 - 1);
+                mat_load((matrix_t*)&uniformObject.dir[0][0][0]);
+                auto normalPointer = &go->mesh->data[meshlet->vertexOffset] + normalOffset;
+                auto vtxSize = meshlet->vertexSize;
+                tnlMeshletDiffuseColorSelector[normalSelector](OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, &lightDiffuseColors[0]);
+            
+                if (pass2) {
+                    unsigned normalSelector = (pass2 - 1);
+                    mat_load((matrix_t*)&uniformObject.dir[1][0][0]);
+                    tnlMeshletDiffuseColorSelector[normalSelector](OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, &lightDiffuseColors[4]);
+                }
+            }
+
+            auto indexData = (int8_t*)&go->mesh->data[meshlet->indexOffset];
+
+            if (!clippingRequired) {
+                submitMeshletSelector[textured](OCR_SPACE, indexData, meshlet->indexCount);
+            } else {
+                clipAndsubmitMeshletSelector[textured](OCR_SPACE, indexData, meshlet->indexCount);
+            }
         }
     }
 }
@@ -2278,7 +2296,7 @@ int main(int argc, const char** argv) {
 		pvr_params.vertex_buf_size = (1024 + 768) * 1024;
 		pvr_params.opb_overflow_count = 4; // 307200 bytes
 	} else {
-		pvr_params.vertex_buf_size = (1024 + 512) * 1024;
+		pvr_params.vertex_buf_size = (1024 + 1024) * 1024;
 		pvr_params.opb_overflow_count = 7; // 268800 bytes
 	}
 
@@ -2430,7 +2448,7 @@ int main(int argc, const char** argv) {
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_OP_POLY);
         for (auto& go: gameObjects) {
-            if (go->active && go->mesh_enabled && go->mesh && go->material && go->material->color.alpha == 1) {
+            if (go->active && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
                 renderMesh<PVR_LIST_OP_POLY>(&cam, go);
             }
         }
@@ -2439,7 +2457,7 @@ int main(int argc, const char** argv) {
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_TR_POLY);
         for (auto& go: gameObjects) {
-            if (go->active && go->mesh_enabled && go->mesh && go->material && go->material->color.alpha != 1) {
+            if (go->active && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha != 1) {
                 renderMesh<PVR_LIST_TR_POLY>(&cam, go);
             }
         }

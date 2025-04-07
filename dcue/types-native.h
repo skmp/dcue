@@ -36,12 +36,12 @@ namespace native {
             };
 
             struct {
-                V3d at;
-                float at_w;
-                V3d up;
-                float up_w;
                 V3d right;
                 float right_w;
+                V3d up;
+                float up_w;
+                V3d at;
+                float at_w;
                 V3d pos;
                 float pos_w;
             };
@@ -51,7 +51,8 @@ namespace native {
     struct game_object_t {
         r_matrix_t ltw;
         mesh_t* mesh;
-        material_t* material;
+        material_t** materials;
+        size_t submesh_count;
         bool active;
         bool mesh_enabled;
     };
