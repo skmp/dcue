@@ -366,6 +366,7 @@ public class DreamExporter : MonoBehaviour
                         foreach (var index in index_lump_linear)
                         {
                             var uv = uvs[index] * current_tso.scale + current_tso.offset;
+                            uv.x = -uv.x;
                             all_uvs.Add(uv);
                         }
                     }
