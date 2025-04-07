@@ -158,6 +158,10 @@ pvr_tex loadPVR(const char *fname) {
     
     fread(rv.data.data(), 1, rv.data.size(), tex); /* Read in the PVR texture data */
     texloadf("PVR TEXTURE READ: %ix%i, %i, %i\n", HDR.nWidth, HDR.nHeight, rv.offs, rv.data.size());
+
+    rv.lw = __builtin_ctz(HDR.nWidth) - 3;
+    rv.lh = __builtin_ctz(HDR.nHeight) - 3;
+
     if (rv.data.size() >= 256) {
         assert((rv.data.size() & 255) == 0);
     } else {
