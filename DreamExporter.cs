@@ -9,11 +9,152 @@ using UnityEngine.SceneManagement;
 
 public class DreamExporter : MonoBehaviour
 {
+    static bool ArraysEqual<T>(T[] a1, T[] a2)
+    {
+        if (ReferenceEquals(a1, a2))
+            return true;
+
+        if (a1 == null || a2 == null)
+            return false;
+
+        if (a1.Length != a2.Length)
+            return false;
+
+        var comparer = EqualityComparer<T>.Default;
+        for (int i = 0; i < a1.Length; i++)
+        {
+            if (!comparer.Equals(a1[i], a2[i])) return false;
+        }
+        return true;
+    }
+
+    class DreamTexScaleOffset
+    {
+        public Vector2 scale;
+        public Vector2 offset;
+        public bool valid;
+
+        public DreamTexScaleOffset(bool valid, Vector2 scale, Vector2 offset)
+        {
+            this.valid = valid;
+            this.scale = scale;
+            this.offset = offset;
+        }
+
+        public override int GetHashCode()
+        {
+            return offset.GetHashCode() ^ scale.GetHashCode() ^ valid.GetHashCode();
+        }
+        public override bool Equals(object obj)
+        {
+            var other = obj as DreamTexScaleOffset;
+
+            if (other != null)
+            {
+                return valid == other.valid && offset == other.offset && scale == other.scale;
+            }
+
+            return false;
+        }
+
+        // Overload == and != for consistency
+        public static bool operator ==(DreamTexScaleOffset left, DreamTexScaleOffset right)
+        {
+            if (left is null) return right is null;
+
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(DreamTexScaleOffset left, DreamTexScaleOffset right)
+        {
+            return !(left == right);
+        }
+    }
+    class DreamMesh
+    {
+        public Mesh mesh;
+        public DreamTexScaleOffset[] tso = new DreamTexScaleOffset[0];
+        public List<DreamTexScaleOffset> tsoIndexLinear = new List<DreamTexScaleOffset>();
+        public Dictionary<DreamTexScaleOffset, List<int>> tsoIndexMateralNum = new Dictionary<DreamTexScaleOffset, List<int>>();
+
+        public DreamMesh(Mesh mesh, Material[] materials)
+        {
+            if (mesh.subMeshCount != materials.Length)
+            {
+                throw new Exception("Submeshes != Materials?");
+            }
+
+            if (mesh.subMeshCount == 0)
+            {
+                throw new Exception("mesh.subMeshCount == 0 ?!");
+            }
+
+            this.mesh = mesh;
+            tso = new DreamTexScaleOffset[materials.Length];
+
+            for (int materialNum = 0; materialNum < materials.Length; materialNum++)
+            {
+                var material = materials[materialNum];
+
+                if (material == null)
+                {
+                    tso[materialNum] = new DreamTexScaleOffset(false, Vector2.zero, Vector2.zero);
+                    if (!tsoIndexMateralNum.ContainsKey(tso[materialNum]))
+                    {
+                        tsoIndexLinear.Add(tso[materialNum]);
+                        tsoIndexMateralNum[tso[materialNum]] = new List<int>();
+                    }
+                    tsoIndexMateralNum[tso[materialNum]].Add(materialNum);
+                    continue;
+                }
+
+                tso[materialNum] = new DreamTexScaleOffset(true, material.mainTextureScale, material.mainTextureOffset);
+
+                if (!tsoIndexMateralNum.ContainsKey(tso[materialNum]))
+                {
+                    tsoIndexLinear.Add(tso[materialNum]);
+                    tsoIndexMateralNum[tso[materialNum]] = new List<int>();
+                }
+                tsoIndexMateralNum[tso[materialNum]].Add(materialNum);
+            }
+        }
+
+        // Override GetHashCode to match Equals behavior
+        public override int GetHashCode()
+        {
+            return mesh.GetHashCode();
+        }
+
+        public override bool Equals(object obj)
+        {
+            var other = obj as DreamMesh;
+
+            if (other != null)
+            {
+                return mesh == other.mesh && ArraysEqual(tso, other.tso);
+            }
+
+            return false;
+        }
+
+        // Overload == and != for consistency
+        public static bool operator ==(DreamMesh left, DreamMesh right)
+        {
+            if (left is null) return right is null;
+
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(DreamMesh left, DreamMesh right)
+        {
+            return !(left == right);
+        }
+    }
     class DreamScene
     {
         public HashSet<Material> materials = new HashSet<Material>();
         public HashSet<Texture> textures = new HashSet<Texture>();
-        public HashSet<Mesh> meshes = new HashSet<Mesh>();
+        public HashSet<DreamMesh> meshes = new HashSet<DreamMesh>();
         public List<GameObject> gameObjects = new List<GameObject>();
     }
 
@@ -58,7 +199,8 @@ public class DreamExporter : MonoBehaviour
         // Create lists (for consistent ordering) and dictionaries (for lookups)
         List<Texture> textureList = new List<Texture>(ds.textures);
         List<Material> materialList = new List<Material>(ds.materials);
-        List<Mesh> meshList = new List<Mesh>(ds.meshes);
+
+        List<DreamMesh> meshList = new List<DreamMesh>(ds.meshes);
 
         Dictionary<Texture, int> textureIndex = new Dictionary<Texture, int>();
         for (int i = 0; i < textureList.Count; i++)
@@ -70,7 +212,7 @@ public class DreamExporter : MonoBehaviour
         {
             materialIndex[materialList[i]] = i;
         }
-        Dictionary<Mesh, int> meshIndex = new Dictionary<Mesh, int>();
+        Dictionary<DreamMesh, int> meshIndex = new Dictionary<DreamMesh, int>();
         for (int i = 0; i < meshList.Count; i++)
         {
             meshIndex[meshList[i]] = i;
@@ -105,7 +247,7 @@ public class DreamExporter : MonoBehaviour
                     {
                         tex2D = GetReadableTexture(tex2D);
                     }
-                    
+
                     byte[] rawData = tex2D.GetRawTextureData();
                     if (rawData.Length != tex2D.width * tex2D.height * 4)
                     {
@@ -146,72 +288,171 @@ public class DreamExporter : MonoBehaviour
             // Write Meshes Section
             // --------------------
             writer.Write(meshList.Count);
-            foreach (Mesh mesh in meshList)
+            foreach (DreamMesh dmesh in meshList)
             {
-                // Vertices: write count then each vertex (x, y, z)
-                Vector3[] vertices = mesh.vertices;
-                if (vertices.Length > 65535)
+                var mesh = dmesh.mesh;
+
+                Dictionary<int, int>[] base_replicas_decode = new Dictionary<int, int>[dmesh.tso.Length];
+
+                for (int i = 0; i < base_replicas_decode.Length; i++)
                 {
-                    throw new Exception("Mesh vertices count > 65535");
+                    base_replicas_decode[i] = new Dictionary<int, int>();
                 }
 
-                writer.Write(vertices.Length);
-                foreach (Vector3 v in vertices)
+                var tso_index_list = dmesh.tsoIndexLinear;
+
+                int replica_base = 0;
+                List<Vector3> all_verts = new List<Vector3>();
+                List<Vector2> all_uvs = new List<Vector2>();
+                List<Color32> all_cols = new List<Color32>();
+                List<Vector3> all_normals = new List<Vector3>();
+
+                for (int current_replica = 0; current_replica < tso_index_list.Count; current_replica++)
+                {
+                    var current_tso = tso_index_list[current_replica];
+
+                    Dictionary<int, int> index_lump = new Dictionary<int, int>();
+                    List<int> index_lump_linear = new List<int>();
+
+                    foreach (var submeshNum in dmesh.tsoIndexMateralNum[current_tso])
+                    {
+                        int[] indices = mesh.GetIndices(submeshNum);
+                        foreach (var index in indices)
+                        {
+                            if (!index_lump.ContainsKey(index))
+                            {
+                                index_lump_linear.Add(index);
+                                index_lump.Add(index, index_lump.Count); // NB this will modify index_lump.Count
+                            }
+
+                            if (!base_replicas_decode[submeshNum].ContainsKey(index))
+                            {
+                                base_replicas_decode[submeshNum].Add(index, replica_base + index_lump[index]);
+                            }
+                            else
+                            {
+                                if (base_replicas_decode[submeshNum][index] != replica_base + index_lump[index])
+                                {
+                                    throw new Exception("Index missmatch");
+                                }
+                            }
+                        }
+                    }
+
+                    Debug.Log("Replica: " + current_replica + " replica_base " + replica_base);
+
+                    replica_base += index_lump_linear.Count;
+
+                    // Vertices: write count then each vertex (x, y, z)
+                    Vector3[] vertices = mesh.vertices;
+
+                    if (index_lump_linear.Count == 0)
+                    {
+                        throw new Exception("index_lump_linear.Count == 0");
+                    }
+
+                    foreach (var index in index_lump_linear)
+                    {
+                        var v = vertices[index];
+                        all_verts.Add(v);
+                    }
+
+                    // TODO: Fix up
+
+                    // UVs: write count then each uv (x, y)
+                    Vector2[] uvs = mesh.uv;
+                    if (uvs.Length > 0)
+                    {
+                        foreach (var index in index_lump_linear)
+                        {
+                            var uv = uvs[index] * current_tso.scale + current_tso.offset;
+                            all_uvs.Add(uv);
+                        }
+                    }
+
+                    // Colors: write count then each color (a, r, g, b as bytes)
+                    Color32[] colors = mesh.colors32;
+                    if (colors.Length > 0)
+                    {
+                        foreach (var index in index_lump_linear)
+                        {
+                            var c = colors[index];
+                            all_cols.Add(c);
+                        }
+                    }
+
+                    // Normals: write count then each normal (x, y, z)
+                    Vector3[] normals = mesh.normals;
+                    if (normals.Length > 0)
+                    {
+                        foreach (var index in index_lump_linear)
+                        {
+                            var n = normals[index];
+                            all_normals.Add(n);
+                        }
+                    }
+
+                }
+
+                writer.Write(all_verts.Count);
+                foreach (var v in all_verts)
                 {
                     writer.Write(v.x);
                     writer.Write(v.y);
                     writer.Write(v.z);
                 }
-
-                // UVs: write count then each uv (x, y)
-                Vector2[] uvs = mesh.uv;
-                writer.Write(uvs.Length);
-                if (uvs.Length > 0)
+                writer.Write(all_uvs.Count);
+                foreach (var uv in all_uvs)
                 {
-                    foreach (Vector2 uv in uvs)
-                    {
-                        writer.Write(uv.x);
-                        writer.Write(uv.y);
-                    }
+                    writer.Write(uv.x);
+                    writer.Write(uv.y);
+                }
+                writer.Write(all_cols.Count);
+                foreach (var c in all_cols)
+                {
+                    writer.Write(c.a);
+                    writer.Write(c.r);
+                    writer.Write(c.g);
+                    writer.Write(c.b);
+                }
+                writer.Write(all_normals.Count);
+                foreach (var n in all_normals)
+                {
+                    writer.Write(n.x);
+                    writer.Write(n.y);
+                    writer.Write(n.z);
                 }
 
-                // Colors: write count then each color (a, r, g, b as bytes)
-                Color32[] colors = mesh.colors32;
-                writer.Write(colors.Length);
-                if (colors.Length > 0)
-                {
-                    foreach (Color32 c in colors)
-                    {
-                        writer.Write(c.a);
-                        writer.Write(c.r);
-                        writer.Write(c.g);
-                        writer.Write(c.b);
-                    }
-                }
+                Debug.Log("Replicas: " + base_replicas_decode.Length + " replicated vtx: " + (replica_base - mesh.vertices.Length));
 
-                // Normals: write count then each normal (x, y, z)
-                Vector3[] normals = mesh.normals;
-                writer.Write(normals.Length);
-                if (normals.Length > 0)
+                if (replica_base > 65535)
                 {
-                    foreach (Vector3 n in normals)
-                    {
-                        writer.Write(n.x);
-                        writer.Write(n.y);
-                        writer.Write(n.z);
-                    }
+                    throw new Exception("Mesh vertices count > 65535, replica_base = " + replica_base + " mesh.vertices.Length = " + mesh.vertices.Length);
                 }
 
                 writer.Write((int)mesh.subMeshCount);
-                
+
+                var meshvers = mesh.vertices;
+
                 for (int i = 0; i < mesh.subMeshCount; i++)
                 {
                     // Indices: write count then each index as a ushort.
                     int[] indices = mesh.GetIndices(i);
+
                     writer.Write((int)indices.Length);
                     foreach (int index in indices)
                     {
-                        writer.Write((ushort)index);
+                        if (!base_replicas_decode[i].ContainsKey(index))
+                        {
+                            throw new Exception("!base_replicas_decode[i].ContainsKey(index)");
+                        }
+                        var index_dereplicated = base_replicas_decode[i][index];
+
+                        if (meshvers[index] != all_verts[index_dereplicated])
+                        {
+                            throw new Exception("Vertex missmatch");
+                        }
+                        writer.Write((ushort)index_dereplicated);
                     }
                 }
             }
@@ -237,14 +478,14 @@ public class DreamExporter : MonoBehaviour
                 writer.Write(mtx.m32); writer.Write(mtx.m33);
 
                 // Check for an attached mesh and material.
-                Mesh mesh = null;
+                DreamMesh mesh = null;
                 Material[] materials = new Material[0];
                 bool meshEnabled = false;
                 MeshFilter mf = go.GetComponent<MeshFilter>();
                 MeshRenderer mr = go.GetComponent<MeshRenderer>();
-                if (mf != null && mr != null)
+                if (mf != null && mr != null && mf.sharedMesh != null && mr.sharedMaterials != null)
                 {
-                    mesh = mf.sharedMesh;
+                    mesh = new DreamMesh(mf.sharedMesh, mr.sharedMaterials);
                     materials = mr.sharedMaterials;
                     meshEnabled = mr.enabled;
                 }
@@ -263,7 +504,8 @@ public class DreamExporter : MonoBehaviour
                     if (material != null)
                     {
                         writer.Write(materialIndex[material]);
-                    } else
+                    }
+                    else
                     {
                         writer.Write((int)-1);
                     }
@@ -286,34 +528,25 @@ public class DreamExporter : MonoBehaviour
             {
                 MeshFilter meshFilter = (MeshFilter)component;
                 Mesh mesh = meshFilter.sharedMesh;
-                if (mesh != null)
+                MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>();
+                if (mesh != null && meshRenderer != null)
                 {
-                    ds.meshes.Add(mesh);
+                    ds.meshes.Add(new DreamMesh(mesh, meshRenderer.sharedMaterials));
 
 
-
-                    MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>();
-                    if (meshRenderer != null && meshRenderer.sharedMaterial != null)
+                    foreach (Material material in meshRenderer.sharedMaterials)
                     {
-                        if (mesh.subMeshCount != meshRenderer.sharedMaterials.Length)
+                        if (material != null)
                         {
-                            throw new Exception("Submeshes != Materials?");
-                        }
-                        foreach (Material material in meshRenderer.sharedMaterials)
-                        {
-                            if (material != null)
+                            ds.materials.Add(material);
+                            if (material.mainTexture != null)
                             {
-                                ds.materials.Add(material);
-                                if (material.mainTexture != null)
+                                if (material.mainTexture is Texture2D)
                                 {
-                                    if (material.mainTexture is Texture2D)
-                                    {
-                                        ds.textures.Add(material.mainTexture);
-                                    }
+                                    ds.textures.Add(material.mainTexture);
                                 }
                             }
                         }
-                        
                     }
                 }
             }
