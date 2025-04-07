@@ -77,12 +77,12 @@ public class DreamExporter : MonoBehaviour
         }
 
         Debug.Log("Exporting ...");
-        // Write binary file with header "DCUE0000"
+        // Write binary file with header "DCUE0001"
         using (FileStream fs = new FileStream("dream.dat", FileMode.Create))
         using (BinaryWriter writer = new BinaryWriter(fs, Encoding.UTF8))
         {
             // Write header (8 bytes)
-            writer.Write(Encoding.ASCII.GetBytes("DCUE0000"));
+            writer.Write(Encoding.ASCII.GetBytes("DCUE0001"));
 
             // --------------------
             // Write Textures Section
@@ -115,7 +115,7 @@ public class DreamExporter : MonoBehaviour
                 }
                 else
                 {
-                    throw new Exception("Texture is not a Texture2D");
+                    throw new Exception("Texture is not a Texture2D " + tex.GetType().Name);
                 }
             }
 
@@ -150,6 +150,11 @@ public class DreamExporter : MonoBehaviour
             {
                 // Vertices: write count then each vertex (x, y, z)
                 Vector3[] vertices = mesh.vertices;
+                if (vertices.Length > 65535)
+                {
+                    throw new Exception("Mesh vertices count > 65535");
+                }
+
                 writer.Write(vertices.Length);
                 foreach (Vector3 v in vertices)
                 {
@@ -197,16 +202,17 @@ public class DreamExporter : MonoBehaviour
                     }
                 }
 
-                // Indices: write count then each index as a ushort.
-                int[] indices = mesh.GetIndices(0);
-                if (indices.Length > 65535)
+                writer.Write((int)mesh.subMeshCount);
+                
+                for (int i = 0; i < mesh.subMeshCount; i++)
                 {
-                    throw new Exception("Mesh indices count > 65535");
-                }
-                writer.Write(indices.Length);
-                foreach (int index in indices)
-                {
-                    writer.Write((ushort)index);
+                    // Indices: write count then each index as a ushort.
+                    int[] indices = mesh.GetIndices(i);
+                    writer.Write((int)indices.Length);
+                    foreach (int index in indices)
+                    {
+                        writer.Write((ushort)index);
+                    }
                 }
             }
 
@@ -232,14 +238,14 @@ public class DreamExporter : MonoBehaviour
 
                 // Check for an attached mesh and material.
                 Mesh mesh = null;
-                Material material = null;
+                Material[] materials = new Material[0];
                 bool meshEnabled = false;
                 MeshFilter mf = go.GetComponent<MeshFilter>();
                 MeshRenderer mr = go.GetComponent<MeshRenderer>();
                 if (mf != null && mr != null)
                 {
                     mesh = mf.sharedMesh;
-                    material = mr.sharedMaterial;
+                    materials = mr.sharedMaterials;
                     meshEnabled = mr.enabled;
                 }
                 writer.Write(meshEnabled);
@@ -251,11 +257,16 @@ public class DreamExporter : MonoBehaviour
                     writer.Write(meshIndex[mesh]);
                 }
                 // Write material index if material exists.
-                bool hasMaterial = (material != null) && materialIndex.ContainsKey(material);
-                writer.Write(hasMaterial);
-                if (hasMaterial)
+                writer.Write((int)materials.Length);
+                foreach (Material material in materials)
                 {
-                    writer.Write(materialIndex[material]);
+                    if (material != null)
+                    {
+                        writer.Write(materialIndex[material]);
+                    } else
+                    {
+                        writer.Write((int)-1);
+                    }
                 }
             }
         }
@@ -267,23 +278,42 @@ public class DreamExporter : MonoBehaviour
     {
         ds.gameObjects.Add(gameObject);
 
-        int compCount = gameObject.GetComponentCount();
-        for (int i = 0; i < compCount; i++)
+        //int compCount = gameObject.GetComponents()
+        //for (int i = 0; i < compCount; i++)
         {
-            var component = gameObject.GetComponentAtIndex(i);
-            if (component.GetType() == typeof(MeshFilter))
+            var component = gameObject.GetComponent<MeshFilter>();
+            if (component != null && component.GetType() == typeof(MeshFilter))
             {
                 MeshFilter meshFilter = (MeshFilter)component;
                 Mesh mesh = meshFilter.sharedMesh;
-                ds.meshes.Add(mesh);
-
-                MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>();
-                if (meshRenderer != null && meshRenderer.sharedMaterial != null)
+                if (mesh != null)
                 {
-                    ds.materials.Add(meshRenderer.sharedMaterial);
-                    if (meshRenderer.sharedMaterial.mainTexture != null)
+                    ds.meshes.Add(mesh);
+
+
+
+                    MeshRenderer meshRenderer = gameObject.GetComponent<MeshRenderer>();
+                    if (meshRenderer != null && meshRenderer.sharedMaterial != null)
                     {
-                        ds.textures.Add(meshRenderer.sharedMaterial.mainTexture);
+                        if (mesh.subMeshCount != meshRenderer.sharedMaterials.Length)
+                        {
+                            throw new Exception("Submeshes != Materials?");
+                        }
+                        foreach (Material material in meshRenderer.sharedMaterials)
+                        {
+                            if (material != null)
+                            {
+                                ds.materials.Add(material);
+                                if (material.mainTexture != null)
+                                {
+                                    if (material.mainTexture is Texture2D)
+                                    {
+                                        ds.textures.Add(material.mainTexture);
+                                    }
+                                }
+                            }
+                        }
+                        
                     }
                 }
             }

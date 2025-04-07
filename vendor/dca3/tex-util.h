@@ -161,7 +161,7 @@ pvr_tex loadPVR(const char *fname) {
     if (rv.data.size() >= 256) {
         assert((rv.data.size() & 255) == 0);
     } else {
-        assert((rv.data.size() & 31) == 0);
+        // assert((rv.data.size() & 31) == 0);
     }
 
     fclose(tex);

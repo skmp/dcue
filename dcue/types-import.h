@@ -35,19 +35,23 @@ namespace import {
         }
     };
 
-    struct mesh_t {
+    struct submesh_t {
         uint16_t* indices;
+        size_t index_count;
+    };
+    struct mesh_t {
         float* vertices;
         float* uv;
         uint8_t* col;
         float* normals;
         size_t vertex_count;
-        size_t index_count;
+        submesh_t* submeshes;
+        size_t submesh_count;
 
-        mesh_t(size_t index_count, uint16_t* indices, size_t vertex_count, float* vertices, float* uv, uint8_t* col, float* normals)
+        mesh_t(size_t submesh_count, submesh_t* submeshes, size_t vertex_count, float* vertices, float* uv, uint8_t* col, float* normals)
         {
-            this->index_count = index_count;
-            this->indices = indices;
+            this->submesh_count = submesh_count;
+            this->submeshes = submeshes;
             this->vertex_count = vertex_count;
             this->vertices = vertices;
             this->uv = uv;
@@ -66,17 +70,17 @@ namespace import {
     struct game_object_t {
         matrix_t* transform;
         mesh_t* mesh;
-        material_t* material;
+        material_t** materials;
         bool active;
         bool mesh_enabled;
 
-        game_object_t(bool active, matrix_t* transform, bool mesh_enabled, mesh_t* mesh, material_t* material)
+        game_object_t(bool active, matrix_t* transform, bool mesh_enabled, mesh_t* mesh, material_t** materials)
         {
             this->active = active;
             this->transform = transform;
             this->mesh_enabled = mesh_enabled;
             this->mesh = mesh;
-            this->material = material;
+            this->materials = materials;
         }
     };
 }

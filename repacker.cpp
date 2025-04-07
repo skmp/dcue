@@ -74,7 +74,7 @@ void loadDreamScene(const char *scene) {
     // Read and verify header (8 bytes)
     char header[8];
     in.read(header, 8);
-    if (std::string(header, 8) != "DCUE0000") {
+    if (std::string(header, 8) != "DCUE0001") {
         printf("Invalid file header\n");
         exit(1);
     }
@@ -127,46 +127,53 @@ void loadDreamScene(const char *scene) {
     int meshCount = 0;
     in.read(reinterpret_cast<char*>(&meshCount), sizeof(int));
     for (int i = 0; i < meshCount; i++) {
-        // Vertices
-        int vertexCount = 0;
-        in.read(reinterpret_cast<char*>(&vertexCount), sizeof(int));
-        float* vertices = new float[vertexCount * 3];
-        in.read(reinterpret_cast<char*>(vertices), vertexCount * 3 * sizeof(float));
+		// Vertices
+		int vertexCount = 0;
+		in.read(reinterpret_cast<char*>(&vertexCount), sizeof(int));
+		float* vertices = new float[vertexCount * 3];
+		in.read(reinterpret_cast<char*>(vertices), vertexCount * 3 * sizeof(float));
 
-        // UVs
-        int uvCount = 0;
-        in.read(reinterpret_cast<char*>(&uvCount), sizeof(int));
-        float* uvs = nullptr;
-        if (uvCount > 0) {
-            uvs = new float[uvCount * 2];
-            in.read(reinterpret_cast<char*>(uvs), uvCount * 2 * sizeof(float));
-        }
+		// UVs
+		int uvCount = 0;
+		in.read(reinterpret_cast<char*>(&uvCount), sizeof(int));
+		float* uvs = nullptr;
+		if (uvCount > 0) {
+			uvs = new float[uvCount * 2];
+			in.read(reinterpret_cast<char*>(uvs), uvCount * 2 * sizeof(float));
+		}
 
-        // Colors (Color32: 4 bytes per element)
-        int colorCount = 0;
-        in.read(reinterpret_cast<char*>(&colorCount), sizeof(int));
-        uint8_t* colors = nullptr;
-        if (colorCount > 0) {
-            colors = new uint8_t[colorCount * 4];
-            in.read(reinterpret_cast<char*>(colors), colorCount * 4 * sizeof(uint8_t));
-        }
+		// Colors (Color32: 4 bytes per element)
+		int colorCount = 0;
+		in.read(reinterpret_cast<char*>(&colorCount), sizeof(int));
+		uint8_t* colors = nullptr;
+		if (colorCount > 0) {
+			colors = new uint8_t[colorCount * 4];
+			in.read(reinterpret_cast<char*>(colors), colorCount * 4 * sizeof(uint8_t));
+		}
 
-        // Normals
-        int normalCount = 0;
-        in.read(reinterpret_cast<char*>(&normalCount), sizeof(int));
-        float* normals = nullptr;
-        if (normalCount > 0) {
-            normals = new float[normalCount * 3];
-            in.read(reinterpret_cast<char*>(normals), normalCount * 3 * sizeof(float));
-        }
+		// Normals
+		int normalCount = 0;
+		in.read(reinterpret_cast<char*>(&normalCount), sizeof(int));
+		float* normals = nullptr;
+		if (normalCount > 0) {
+			normals = new float[normalCount * 3];
+			in.read(reinterpret_cast<char*>(normals), normalCount * 3 * sizeof(float));
+		}
 
-        // Indices
-        int indexCount = 0;
-        in.read(reinterpret_cast<char*>(&indexCount), sizeof(int));
-        uint16_t* indices = new uint16_t[indexCount];
-        in.read(reinterpret_cast<char*>(indices), indexCount * sizeof(uint16_t));
+		int subMeshCount = 0;
+    	in.read(reinterpret_cast<char*>(&subMeshCount), sizeof(int));
+		submesh_t* submeshes = new submesh_t[subMeshCount];
+		for (int subMeshNum = 0; subMeshNum < subMeshCount; subMeshNum++) {
+			// Indices
+			int indexCount = 0;
+			in.read(reinterpret_cast<char*>(&indexCount), sizeof(int));
+			uint16_t* indices = new uint16_t[indexCount];
+			in.read(reinterpret_cast<char*>(indices), indexCount * sizeof(uint16_t));
 
-        mesh_t* mesh = new mesh_t(indexCount, indices, vertexCount, vertices, uvs, colors, normals);
+			submeshes[subMeshNum].index_count = indexCount;
+			submeshes[subMeshNum].indices = indices;
+		}
+        mesh_t* mesh = new mesh_t(subMeshCount, submeshes, vertexCount, vertices, uvs, colors, normals);
         meshes.push_back(mesh);
     }
 
@@ -201,18 +208,23 @@ void loadDreamScene(const char *scene) {
         }
 
         // Material reference
-        char hasMaterialChar = 0;
-        in.read(&hasMaterialChar, 1);
-        bool hasMaterial = (hasMaterialChar != 0);
-        material_t* material = nullptr;
+        int materialsLength = 0;
+		in.read(reinterpret_cast<char*>(&materialsLength), sizeof(int));
+        bool hasMaterial = (materialsLength != 0);
+        material_t** materials_lst = nullptr;
         if (hasMaterial) {
-            int materialIndex = 0;
-            in.read(reinterpret_cast<char*>(&materialIndex), sizeof(int));
-            if (materialIndex >= 0 && materialIndex < static_cast<int>(materials.size()))
-                material = materials[materialIndex];
+			materials_lst = new material_t*[materialsLength];
+			for (int materialNum = 0; materialNum < materialsLength; materialNum++) {
+            	int materialIndex = 0;
+				in.read(reinterpret_cast<char*>(&materialIndex), sizeof(int));
+				if (materialIndex >= 0 && materialIndex < static_cast<int>(materials.size()))
+					materials_lst[materialNum] = materials[materialIndex];
+				else
+					materials_lst[materialNum] = nullptr;
+			}
         }
 
-        game_object_t* go = new game_object_t(active, transform, meshEnabled, mesh, material);
+        game_object_t* go = new game_object_t(active, transform, meshEnabled, mesh, materials_lst);
         gameObjects.push_back(go);
     }
 
@@ -463,7 +475,7 @@ struct compressed_mesh_t {
 compressed_mesh_t process_mesh(mesh_t *mesh) {
 	using namespace triangle_stripper;
 	
-	int32 n = 1;
+	int32 n = mesh->submesh_count;
 	std::vector<primitive_vector> pvecs(n);
 	std::vector<std::vector<meshlet>> meshMeshlets(n);
 
@@ -526,16 +538,17 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 		}
 	}
 	texconvf("Found %zu vertex duplicates, %.2f%%\n", dups, (float)dups/mesh->vertex_count*100);
+	for (int submeshNum = 0; submeshNum < n; submeshNum++)
 	{
-        size_t meshNum = 0;
-		totalTrilist += mesh->index_count;
+		auto submesh = &mesh->submeshes[submeshNum];
+		totalTrilist += submesh->index_count;
 
-		for (size_t i = 0; i < mesh->index_count; i++) {
-			mesh->indices[i] = canonicalIdx[mesh->indices[i]];
+		for (size_t i = 0; i < submesh->index_count; i++) {
+			submesh->indices[i] = canonicalIdx[submesh->indices[i]];
 		}
 
 		{
-			indices Indices(mesh->indices, mesh->indices + mesh->index_count);
+			indices Indices(submesh->indices, submesh->indices + submesh->index_count);
 
 			tri_stripper TriStripper(Indices);
 
@@ -543,10 +556,10 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 			TriStripper.SetCacheSize(0);
 			TriStripper.SetBackwardSearch(true);
 
-			TriStripper.Strip(&pvecs[meshNum]);
+			TriStripper.Strip(&pvecs[submeshNum]);
 		}
 
-		for (auto &&strip: pvecs[meshNum]) {
+		for (auto &&strip: pvecs[submeshNum]) {
 			totalIndices += strip.Indices.size();
 			if (strip.Type == TRIANGLES) {
 				assert(strip.Indices.size()%3==0);
@@ -811,12 +824,18 @@ int main(int argc, const char** argv) {
 
         auto pvr_filename = ss2.str();
 
-        std::cout << "Processing texture: " << pvr_filename << std::endl;
+        std::cout << "Processing texture: " << pvr_filename << " " << tex->file << std::endl;
 
         if (!std::filesystem::exists(pvr_filename)) {
             auto imageData = createImageFromData_ARGB8888((const uint8_t*)tex->data, tex->width, tex->height, tex->width * 4);
-            auto nw = std::min(256, tex->width/2);
-            auto nh = std::min(256, tex->height/2);
+            auto nw = std::min(128, tex->width/2);
+            if (tex->width < 16) {
+                nw = tex->width;
+			}
+            auto nh = std::min(128, tex->height/2);
+            if (tex->height < 16) {
+                nh = tex->height;
+            }
             assert(nw >= 8);
             assert(nh >= 8);
     
@@ -847,7 +866,9 @@ int main(int argc, const char** argv) {
         hash_sha256 hash;
         hash.sha256_init();
         hash.sha256_update((uint8_t*)mesh->vertices, mesh->vertex_count * 3 * sizeof(float));
-        hash.sha256_update((uint8_t*)mesh->indices, mesh->index_count * sizeof(uint16_t));
+		for (int submeshNum = 0; submeshNum < mesh->submesh_count; submeshNum++) {
+        	hash.sha256_update((uint8_t*)mesh->submeshes[submeshNum].indices, mesh->submeshes[submeshNum].index_count * sizeof(uint16_t));
+		}
         if (mesh->col) {
             hash.sha256_update((uint8_t*)mesh->col, mesh->vertex_count * 4);
         }
@@ -904,9 +925,11 @@ int main(int argc, const char** argv) {
         native_meshes_index[mesh] = native_meshes_map[hash_result];
     }
 
+	std::cout << "Writting out scene " << argv[2] << std::endl;
+
 	auto outfile = std::ofstream(argv[2]);
 
-    outfile.write("DCUENS00", 8);
+    outfile.write("DCUENS01", 8);
     
 	uint32_t tmp;
 
@@ -968,12 +991,20 @@ int main(int argc, const char** argv) {
 			tmp = UINT32_MAX;
 		}
 		outfile.write((char*)&tmp, sizeof(tmp));
-		if (gameObject->material) {
-			tmp = native_materials_index[gameObject->material];
-		} else {
-			tmp = UINT32_MAX;
-		}
+
+		tmp = gameObject->mesh ? gameObject->mesh->submesh_count : 0;
 		outfile.write((char*)&tmp, sizeof(tmp));
+		if (gameObject->mesh) {
+			for (int materialNum = 0; materialNum < gameObject->mesh->submesh_count; materialNum++) {
+				if (gameObject->materials[materialNum]) {
+					tmp = native_materials_index[gameObject->materials[materialNum]];
+				} else {
+					tmp = UINT32_MAX;
+				}
+				outfile.write((char*)&tmp, sizeof(tmp));
+			}
+		}
+		
 	}
 
 	return 0;
