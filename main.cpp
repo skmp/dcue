@@ -1889,19 +1889,19 @@ struct Camera {
         invertGeneral(&inv, &go->ltw);
         // Since we're looking into positive Z,
         // flip X to ge a left handed view space.
-        view[0]  = inv.right.x;
+        view[0]  = -inv.right.x;
         view[1]  =  -inv.right.y;
         view[2]  =  inv.right.z;
         view[3]  =  0.0f;
-        view[4]  = inv.up.x;
+        view[4]  = -inv.up.x;
         view[5]  =  -inv.up.y;
         view[6]  =  inv.up.z;
         view[7]  =  0.0f;
-        view[8]  =  inv.at.x;
+        view[8]  =  -inv.at.x;
         view[9]  =   -inv.at.y;
         view[10] =  inv.at.z;
         view[11] =  0.0f;
-        view[12] = inv.pos.x;
+        view[12] = -inv.pos.x;
         view[13] =  -inv.pos.y;
         view[14] =  inv.pos.z;
         view[15] =  1.0f;
@@ -2393,7 +2393,7 @@ int main(int argc, const char** argv) {
                 }
 
 
-                yaw -= state->joyx * rotateSpeed * deltaTime; // Convert degrees to radians
+                yaw += state->joyx * rotateSpeed * deltaTime; // Convert degrees to radians
                 pitch += state->joyy * rotateSpeed * deltaTime; // Convert degrees to radians
 
                 if (pitch > 89.0f)  pitch = 89.0f;
@@ -2433,12 +2433,12 @@ int main(int argc, const char** argv) {
                 };
 
 
-                matrix_t rotation_matrix_yaw = {
-                    { cosf(-radYaw), 0, -sinf(-radYaw), 0 },
-                    { 0, 1, 0, 0 },
-                    { sinf(-radYaw), 0, cosf(-radYaw), 0 },
-                    { 0, 0, 0, 1 },
-                };
+				matrix_t rotation_matrix_yaw = {
+					{ cosf(radYaw), 0, sinf(radYaw), 0 },
+					{ 0, 1, 0, 0 },
+					{ -sinf(radYaw), 0, cosf(radYaw), 0 },
+					{ 0, 0, 0, 1 },
+				};
 
                 matrix_t rotation_matrix_pitch = {
                     { 1, 0, 0, 0 },
