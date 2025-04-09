@@ -16,6 +16,8 @@
 #include <cstring>
 #include <chrono>
 
+#include "anim.h"
+
 #define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
 
 #define MAX_LIGHTS 8
@@ -2337,14 +2339,14 @@ int main(int argc, const char** argv) {
     //     0, 0, 0, 1.000000
     // };
 
-    float camX = 16317.f, camY = 2.f, camZ = 8539.f;
+    float camX = 155.f, camY = 4.f, camZ = 241.f;
     float yaw = 0.0f, pitch = 0.0f;
 
     const float moveSpeed = 2.f;
     const float rotateSpeed = 45.f / 127;
 
     cam.setFOV(45.0f, 4.0f / 3.0f);
-    cam.nearPlane = 0.1f;
+    cam.nearPlane = 1.f;
     cam.farPlane = 1000.0f;
 
 	#if defined(DC_SH4)
