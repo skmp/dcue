@@ -60,6 +60,31 @@ namespace import {
         }
     };
 
+    struct terrain_t {
+        float sizex,sizey,sizez;
+		float tscalex, tscaley;
+		float toffsetx, toffsety;
+		int width, height;
+		float* tdata;
+
+        terrain_t(float sizex,float sizey,float sizez, float tscalex,float tscaley, float toffsetx,float toffsety, int width,int height, float* tdata) {
+            this->sizex = sizex;
+            this->sizey = sizey;
+            this->sizez = sizez;
+            
+            this->tscalex = tscalex;
+            this->tscaley = tscaley;
+
+            this->toffsetx = toffsetx;
+            this->toffsety = toffsety;
+
+            this->width = width;
+            this->height = height;
+
+            this->tdata = tdata;
+        }
+    };
+
     struct matrix_t {
         float m00, m01, m02, m03;
         float m10, m11, m12, m13;

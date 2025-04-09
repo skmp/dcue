@@ -92,11 +92,24 @@ $(TARGET_SIM): $(OBJS_SIM)
 	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -I../vendor/TriStripper/include -DDC_REPACKER $<
 
 
-OBJS_REPACKER= ../repacker.repacker.o ../vendor/dca3/vq.repacker.o ../vendor/TriStripper/src/connectivity_graph.repacker.o ../vendor/TriStripper/src/policy.repacker.o ../vendor/TriStripper/src/tri_stripper.repacker.o
+OBJS_REPACKER= \
+	../repacker.repacker.o \
+	\
+	../vendor/dca3/vq.repacker.o \
+	\
+	../vendor/TriStripper/src/connectivity_graph.repacker.o \
+	../vendor/TriStripper/src/policy.repacker.o \
+	../vendor/TriStripper/src/tri_stripper.repacker.o \
+	\
+	../vendor/hmm/base.repacker.o \
+	../vendor/hmm/blur.repacker.o \
+	../vendor/hmm/heightmap.repacker.o \
+	../vendor/hmm/triangulator.repacker.o
+
 DEPS_REPACKER=$(OBJS_REPACKER:.o=.d)
 
 repacker.elf: $(OBJS_REPACKER) | pvrtex
-	$(CXX) -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER)
+	$(CXX) -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER)
 
 $(PROJECT_NAME).cdi: $(TARGET)
 	mkdcdisc -e $(TARGET) -o $(PROJECT_NAME).cdi -d $(DATA_DIR)/ $(MKDCDISC_PAD_OPTION) -n $(PROJECT_NAME) -a $(TEAM_NAME) -s $(DISC_SERIAL) -r $(RELEASE_DATE)

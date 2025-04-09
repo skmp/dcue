@@ -150,11 +150,56 @@ public class DreamExporter : MonoBehaviour
             return !(left == right);
         }
     }
+
+    class DreamTerrainData
+    {
+        public TerrainData tdata;
+        public Vector2 tileScale;
+        public Vector2 tileOffset;
+
+        public DreamTerrainData(TerrainData tdata, Vector2 tileScale, Vector2 tileOffset) {
+            this.tdata = tdata;
+            this.tileScale = tileScale;
+            this.tileOffset = tileOffset;
+        }
+
+        public override int GetHashCode()
+        {
+            return tdata.GetHashCode();
+        }
+
+        public override bool Equals(object obj)
+        {
+            var other = obj as DreamTerrainData;
+
+            if (other != null)
+            {
+                return tdata == other.tdata && tileScale == other.tileScale && tileOffset == other.tileOffset;
+            }
+
+            return false;
+        }
+
+        // Overload == and != for consistency
+        public static bool operator ==(DreamTerrainData left, DreamTerrainData right)
+        {
+            if (left is null) return right is null;
+
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(DreamTerrainData left, DreamTerrainData right)
+        {
+            return !(left == right);
+        }
+    }
+
     class DreamScene
     {
         public HashSet<Material> materials = new HashSet<Material>();
         public HashSet<Texture> textures = new HashSet<Texture>();
         public HashSet<DreamMesh> meshes = new HashSet<DreamMesh>();
+        public HashSet<DreamTerrainData> terrains = new HashSet<DreamTerrainData>();
         public List<GameObject> gameObjects = new List<GameObject>();
     }
 
@@ -201,6 +246,7 @@ public class DreamExporter : MonoBehaviour
         List<Material> materialList = new List<Material>(ds.materials);
 
         List<DreamMesh> meshList = new List<DreamMesh>(ds.meshes);
+        List<DreamTerrainData> terrainList = new List<DreamTerrainData>(ds.terrains);
 
         Dictionary<Texture, int> textureIndex = new Dictionary<Texture, int>();
         for (int i = 0; i < textureList.Count; i++)
@@ -217,14 +263,19 @@ public class DreamExporter : MonoBehaviour
         {
             meshIndex[meshList[i]] = i;
         }
+        Dictionary<DreamTerrainData, int> terrainIndex = new Dictionary<DreamTerrainData, int>();
+        for (int i = 0; i < terrainList.Count; i++)
+        {
+            terrainIndex[terrainList[i]] = i;
+        }
 
         Debug.Log("Exporting ...");
-        // Write binary file with header "DCUE0001"
+        // Write binary file with header "DCUE0002"
         using (FileStream fs = new FileStream("dream.dat", FileMode.Create))
         using (BinaryWriter writer = new BinaryWriter(fs, Encoding.UTF8))
         {
             // Write header (8 bytes)
-            writer.Write(Encoding.ASCII.GetBytes("DCUE0001"));
+            writer.Write(Encoding.ASCII.GetBytes("DCUE0002"));
 
             // --------------------
             // Write Textures Section
@@ -339,7 +390,7 @@ public class DreamExporter : MonoBehaviour
                         }
                     }
 
-                    Debug.Log("Replica: " + current_replica + " replica_base " + replica_base);
+                    //Debug.Log("Replica: " + current_replica + " replica_base " + replica_base);
 
                     replica_base += index_lump_linear.Count;
 
@@ -423,7 +474,7 @@ public class DreamExporter : MonoBehaviour
                     writer.Write(n.z);
                 }
 
-                Debug.Log("Replicas: " + base_replicas_decode.Length + " replicated vtx: " + (replica_base - mesh.vertices.Length));
+                //Debug.Log("Replicas: " + base_replicas_decode.Length + " replicated vtx: " + (replica_base - mesh.vertices.Length));
 
                 if (replica_base > 65535)
                 {
@@ -453,6 +504,41 @@ public class DreamExporter : MonoBehaviour
                             throw new Exception("Vertex missmatch");
                         }
                         writer.Write((ushort)index_dereplicated);
+                    }
+                }
+            }
+
+            // --------------------
+            // Write Terrains Section
+            // --------------------
+            writer.Write(ds.terrains.Count);
+            foreach (DreamTerrainData dterraindata in ds.terrains)
+            {
+                var tdata = dterraindata.tdata;
+
+                int width = tdata.heightmapResolution;
+                int height = tdata.heightmapResolution;
+                float[,] heights = tdata.GetHeights(0, 0, width, height);
+
+                Vector3 size = tdata.size;
+                writer.Write(size.x);
+                writer.Write(size.y);
+                writer.Write(size.z);
+
+                writer.Write(dterraindata.tileScale.x);
+                writer.Write(dterraindata.tileScale.y);
+
+                writer.Write(dterraindata.tileOffset.x);
+                writer.Write(dterraindata.tileOffset.y);
+
+                writer.Write(width);
+                writer.Write(height);
+
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        writer.Write(heights[y, x]);
                     }
                 }
             }
@@ -510,6 +596,28 @@ public class DreamExporter : MonoBehaviour
                         writer.Write((int)-1);
                     }
                 }
+
+                // terrain attachment
+                Terrain terrain = go.GetComponent<Terrain>();
+                if (terrain != null && terrain.terrainData != null)
+                {
+                    if (hasMesh)
+                    {
+                        throw new Exception("Can't have both terrain AND mesh on same game object");
+                    }
+
+                    var tdata = terrain.terrainData;
+                    var mat = terrain.materialTemplate;
+
+
+                    var dterraindata = new DreamTerrainData(tdata, mat.mainTextureScale, mat.mainTextureOffset);
+                    writer.Write(terrainIndex[dterraindata]);
+                    writer.Write(materialIndex[mat]);
+                } else
+                {
+                    writer.Write((int)-1);
+                    writer.Write((int)-1);
+                }
             }
         }
 
@@ -548,6 +656,31 @@ public class DreamExporter : MonoBehaviour
                             }
                         }
                     }
+                }
+            }
+
+            {
+                var terrain = gameObject.GetComponent<Terrain>();
+
+                if (terrain != null && terrain.terrainData != null)
+                {
+                    var tdata = terrain.terrainData;
+
+                    var material = terrain.materialTemplate;
+                    if (material == null )
+                    {
+                        throw new Exception("material == null");
+                    }
+                    ds.materials.Add(material);
+                    if (material.mainTexture != null)
+                    {
+                        if (material.mainTexture is Texture2D)
+                        {
+                            ds.textures.Add(material.mainTexture);
+                        }
+                    }
+
+                    ds.terrains.Add(new DreamTerrainData(tdata, material.mainTextureScale, material.mainTextureOffset));
                 }
             }
         }
