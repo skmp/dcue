@@ -26,6 +26,18 @@ namespace native {
         uint8_t data[0];
     };
 
+    struct r_vector3_t {
+        union {
+            struct {
+                float x, y, z;
+            };
+            struct {
+                float r, g, b;
+            };
+        };
+    };
+
+
     struct alignas(8) r_matrix_t {
         union {
             struct {
@@ -50,6 +62,12 @@ namespace native {
 
     struct game_object_t {
         r_matrix_t ltw;
+        r_vector3_t position;
+        r_vector3_t rotation;
+        r_vector3_t scale;
+        game_object_t* parent;
+        unsigned ltw_stamp;
+
         mesh_t* mesh;
         material_t** materials;
         size_t submesh_count;
