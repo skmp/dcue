@@ -13,7 +13,7 @@ DATA_DIR=repack-data/tlj
 
 # include common.mk
 
-OBJS = ../main.o ../vendor/gldc/alloc.o
+OBJS = ../main.o ../vendor/gldc/alloc.o ../anim.o ../hierarchy.o
 DEPS_OBJS=$(OBJS:.o=.d)
 
 OBJS_SIM=$(OBJS:.o=.sim.o) \
