@@ -2570,9 +2570,9 @@ int main(int argc, const char** argv) {
             }
 
             mat_apply((matrix_t*)&pos_mtx);
-            mat_apply((matrix_t*)&rot_mtx_z);
             mat_apply((matrix_t*)&rot_mtx_y);
             mat_apply((matrix_t*)&rot_mtx_x);
+            mat_apply((matrix_t*)&rot_mtx_z);
             mat_apply((matrix_t*)&scale_mtx);
             mat_store((matrix_t*)&go->ltw);
 
