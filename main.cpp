@@ -2380,8 +2380,8 @@ int main(int argc, const char** argv) {
     unsigned currentStamp = 0;
 
     Camera cam;
-    // cam.go = gameObjects[3325];//new game_object_t();
-    cam.go = new game_object_t();
+    cam.go = gameObjects[3325];
+    // cam.go = new game_object_t();
     // cam.go->ltw = r_matrix_t {
     //     -0.198809, 0.000000, 0.980038, 0.000000,
     //     0, 1, 0, 0,
@@ -2407,7 +2407,7 @@ int main(int argc, const char** argv) {
     const float moveSpeed = 2.f;
     const float rotateSpeed = 45.f / 127;
 
-    cam.setFOV(45.0f, 4.0f / 3.0f);
+    cam.setFOV(70.0f, 4.0f / 3.0f);
     cam.nearPlane = 1.f;
     cam.farPlane = 1000.0f;
 
