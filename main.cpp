@@ -2292,6 +2292,64 @@ extern "C" const char* getExecutableTag() {
 	return "tlj "  ":" ;
 }
 
+void animator_t::update(float deltaTime) {
+    currentTime += deltaTime;
+    for (size_t i = 0; i < num_bound_animations; ++i) {
+        auto& boundAnim = bound_animations[i];
+        for (size_t j = 0; j < boundAnim.animation->num_tracks; ++j) {
+            auto& track = boundAnim.animation->tracks[j];
+            auto& binding = boundAnim.bindings[j];
+            auto& currentFrame = boundAnim.currentFrames[j];
+            if (currentFrame >= track.num_keys - 1) {
+                continue;
+            }
+            while (currentFrame < track.num_keys - 1 && currentTime >= track.times[currentFrame + 1]) {
+                ++currentFrame;
+            }
+            if (currentFrame >= track.num_keys - 1) {
+                currentFrame = track.num_keys - 1;
+            }
+            float t = (currentTime - track.times[currentFrame]) / (track.times[currentFrame + 1] - track.times[currentFrame]);
+            auto& value = track.values[currentFrame];
+            auto& nextValue = track.values[currentFrame + 1];
+            if (boundAnim.bindings[j] == SIZE_MAX) {
+                continue;
+            }
+            auto& target = gameObjects[boundAnim.bindings[j]];
+            switch (track.property_key) {
+                case Transform_m_LocalPosition_x:
+                    target->position.x = value + t * (nextValue - value);
+                    break;
+                case Transform_m_LocalPosition_y:
+                    target->position.y = value + t * (nextValue - value);
+                    break;
+                case Transform_m_LocalPosition_z:
+                    target->position.z = value + t * (nextValue - value);
+                    break;
+                case Transform_localEulerAnglesRaw_x:
+                    target->rotation.x = value + t * (nextValue - value);
+                    break;
+                case Transform_localEulerAnglesRaw_y:
+                    target->rotation.y = value + t * (nextValue - value);
+                    break;
+                case Transform_localEulerAnglesRaw_z:
+                    target->rotation.z = value + t * (nextValue - value);
+                    break;
+                case Transform_m_LocalScale_x:
+                    target->scale.x = value + t * (nextValue - value);
+                    break;
+                case Transform_m_LocalScale_y:
+                    target->scale.y = value + t * (nextValue - value);
+                    break;
+                case Transform_m_LocalScale_z:
+                    target->scale.z = value + t * (nextValue - value);
+                    break;
+            }
+        }
+    }
+}
+
+void InitializeHierarchy(std::vector<game_object_t*> gameObjects);
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -2318,7 +2376,11 @@ int main(int argc, const char** argv) {
     loadScene("repack-data/tlj/dream.ndt");
     #endif
 
+    InitializeHierarchy(gameObjects);
+    unsigned currentStamp = 0;
+
     Camera cam;
+    // cam.go = gameObjects[3325];//new game_object_t();
     cam.go = new game_object_t();
     // cam.go->ltw = r_matrix_t {
     //     -0.198809, 0.000000, 0.980038, 0.000000,
@@ -2339,8 +2401,8 @@ int main(int argc, const char** argv) {
     //     0, 0, 0, 1.000000
     // };
 
-    float camX = 155.f, camY = 4.f, camZ = 241.f;
-    float yaw = 0.0f, pitch = 0.0f;
+    float camX = 155.f, camY = 4.f, camZ = 235.f;
+    float yaw = 100.0f, pitch = 0.0f;
 
     const float moveSpeed = 2.f;
     const float rotateSpeed = 45.f / 127;
@@ -2378,7 +2440,7 @@ int main(int argc, const char** argv) {
 
     auto tp_last_frame = std::chrono::system_clock::now();
     for(;;) {
-
+        currentStamp++;
         auto tp_this_frame = std::chrono::system_clock::now();
         
         auto deltaTime = std::chrono::duration_cast<std::chrono::duration<float>>(tp_this_frame - tp_last_frame).count();
@@ -2455,7 +2517,79 @@ int main(int argc, const char** argv) {
                 mat_store((matrix_t*)&cam.go->ltw);
             }
         }
+        
+        for(auto& animator: animators) {
+            animator->update(deltaTime);
+        }
 
+        for (auto go: gameObjects) {
+            r_matrix_t pos_mtx = {
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                go->position.x, go->position.y, go->position.z, 1
+            };
+
+            static const float deg2rad = M_PI/180.0f;
+            r_matrix_t rot_mtx_x = {
+                1, 0, 0, 0,
+                0, cosf(go->rotation.x*deg2rad), sinf(go->rotation.x*deg2rad), 0,
+                0, -sinf(go->rotation.x*deg2rad), cosf(go->rotation.x*deg2rad), 0,
+                0, 0, 0, 1
+            };
+            r_matrix_t rot_mtx_y = {
+                cosf(go->rotation.y*deg2rad), 0, -sinf(go->rotation.y*deg2rad), 0,
+                0, 1, 0, 0,
+                sinf(go->rotation.y*deg2rad), 0, cosf(go->rotation.y*deg2rad), 0,
+                0, 0, 0, 1
+            };
+            r_matrix_t rot_mtx_z = {
+                cosf(go->rotation.z*deg2rad), sinf(go->rotation.z*deg2rad), 0, 0,
+                -sinf(go->rotation.z*deg2rad), cosf(go->rotation.z*deg2rad), 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+            };
+            r_matrix_t scale_mtx = {
+                go->scale.x, 0, 0, 0,
+                0, go->scale.y, 0, 0,
+                0, 0, go->scale.z, 0,
+                0, 0, 0, 1
+            };
+            static r_matrix_t identity_mtx = {
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+            };
+
+
+            if (go->parent) {
+                mat_load((matrix_t*)&go->parent->ltw);
+            } else {
+                mat_load((matrix_t*)&identity_mtx);
+            }
+
+            mat_apply((matrix_t*)&pos_mtx);
+            mat_apply((matrix_t*)&rot_mtx_z);
+            mat_apply((matrix_t*)&rot_mtx_y);
+            mat_apply((matrix_t*)&rot_mtx_x);
+            mat_apply((matrix_t*)&scale_mtx);
+            mat_store((matrix_t*)&go->ltw);
+
+            // printf("BEFORE:\n");
+            // printf("mtx: %f %f %f %f\n", go->ltw.right.x, go->ltw.right.y, go->ltw.right.z, go->ltw.right_w);
+            // printf("mtx: %f %f %f %f\n", go->ltw.up.x, go->ltw.up.y, go->ltw.up.z, go->ltw.up_w);
+            // printf("mtx: %f %f %f %f\n", go->ltw.at.x, go->ltw.at.y, go->ltw.at.z, go->ltw.at_w);
+            // printf("mtx: %f %f %f %f\n", go->ltw.pos.x, go->ltw.pos.y, go->ltw.pos.z, go->ltw.pos_w);
+            // printf("AFTER:\n");
+            // printf("mtx: %f %f %f %f\n", go->ltw.right.x, go->ltw.right.y, go->ltw.right.z, go->ltw.right_w);
+            // printf("mtx: %f %f %f %f\n", go->ltw.up.x, go->ltw.up.y, go->ltw.up.z, go->ltw.up_w);
+            // printf("mtx: %f %f %f %f\n", go->ltw.at.x, go->ltw.at.y, go->ltw.at.z, go->ltw.at_w);
+            // printf("mtx: %f %f %f %f\n", go->ltw.pos.x, go->ltw.pos.y, go->ltw.pos.z, go->ltw.pos_w);
+
+            // printf("\n");
+        }
+        
         cam.beforeRender();
 
         // render frame

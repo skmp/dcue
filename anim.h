@@ -63,6 +63,8 @@ struct animator_t {
     bound_animation_t* bound_animations;
     size_t num_bound_animations;
     float currentTime;
+
+    void update(float deltaTime);
 };
 
 extern std::vector<animator_t*> animators;
