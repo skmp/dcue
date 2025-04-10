@@ -6,9 +6,458 @@ using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using UnityEditor.Animations;
+using System.Linq;
+using Ludiq;
+using UnityEditor.ShaderGraph.Drawing;
+using Bolt;
 
 public class DreamExporter : MonoBehaviour
 {
+    enum AnimationPropertyType
+    {
+        Float,
+        Boolean,
+        Unsupported
+    }
+
+    enum AnimationPropertyKey
+    {
+        AudioSource_Enabled,
+        AudioSource_Volume,
+
+        Camera_FOV,
+
+        GameObject_IsActive,
+
+        Image_Color_b,
+        Image_Color_g,
+        Image_Color_r,
+
+        Light_Color_b,
+        Light_Color_g,
+        Light_Color_r,
+        Light_Intensity,
+
+        MeshRenderer_Enabled,
+        MeshRenderer_material_Color_a,
+        MeshRenderer_material_Color_b,
+        MeshRenderer_material_Color_g,
+        MeshRenderer_material_Color_r,
+        MeshRenderer_material_Glossiness,
+        MeshRenderer_material_Metallic,
+        MeshRenderer_material_Mode,
+
+        Transform_localEulerAnglesRaw_x,
+        Transform_localEulerAnglesRaw_y,
+        Transform_localEulerAnglesRaw_z,
+        Transform_m_LocalPosition_x,
+        Transform_m_LocalPosition_y,
+        Transform_m_LocalPosition_z,
+        Transform_m_LocalScale_x,
+        Transform_m_LocalScale_y,
+        Transform_m_LocalScale_z,
+    }
+
+    class PropertyKeyInfo
+    {
+        public AnimationPropertyType type;
+        public AnimationPropertyKey key;
+        public bool Ignored;
+
+        public PropertyKeyInfo(AnimationPropertyType type, AnimationPropertyKey key, bool Ignored = false)
+        {
+            this.type = type;
+            this.key = key;
+            this.Ignored = Ignored;
+        }
+    }
+
+    static Dictionary<string, PropertyKeyInfo> knownPropertyKeys = new Dictionary<string, PropertyKeyInfo>()
+    {
+        { "AudioSource::m_Enabled", new PropertyKeyInfo(AnimationPropertyType.Boolean, AnimationPropertyKey.AudioSource_Enabled, true) },
+        { "AudioSource::m_Volume", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.AudioSource_Volume, true) },
+        { "Camera::field of view", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Camera_FOV, true) },
+        { "GameObject::m_IsActive", new PropertyKeyInfo(AnimationPropertyType.Boolean, AnimationPropertyKey.GameObject_IsActive, true) },
+        { "Image::m_Color.b", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Image_Color_b, true) },
+        { "Image::m_Color.g", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Image_Color_g, true) },
+        { "Image::m_Color.r", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Image_Color_r, true) },
+        { "Light::m_Color.b", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Light_Color_b, true) },
+        { "Light::m_Color.g", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Light_Color_g, true) },
+        { "Light::m_Color.r", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Light_Color_r, true) },
+        { "Light::m_Intensity", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Light_Intensity, true) },
+        { "MeshRenderer::m_Enabled", new PropertyKeyInfo(AnimationPropertyType.Boolean, AnimationPropertyKey.MeshRenderer_Enabled, true) },
+        { "MeshRenderer::material._Color.a", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.MeshRenderer_material_Color_a, true) },
+        { "MeshRenderer::material._Color.b", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.MeshRenderer_material_Color_b, true) },
+        { "MeshRenderer::material._Color.g", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.MeshRenderer_material_Color_g, true) },
+        { "MeshRenderer::material._Color.r", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.MeshRenderer_material_Color_r, true) },
+        { "MeshRenderer::material._Glossiness", new PropertyKeyInfo(AnimationPropertyType.Unsupported, AnimationPropertyKey.MeshRenderer_material_Glossiness, true) },
+        { "MeshRenderer::material._Metallic", new PropertyKeyInfo(AnimationPropertyType.Unsupported, AnimationPropertyKey.MeshRenderer_material_Metallic, true) },
+        { "MeshRenderer::material._Mode", new PropertyKeyInfo(AnimationPropertyType.Unsupported, AnimationPropertyKey.MeshRenderer_material_Mode, true) },
+
+        { "Transform::localEulerAnglesRaw.x", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_localEulerAnglesRaw_x) },
+        { "Transform::localEulerAnglesRaw.y", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_localEulerAnglesRaw_y) },
+        { "Transform::localEulerAnglesRaw.z", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_localEulerAnglesRaw_z) },
+        { "Transform::m_LocalPosition.x", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_m_LocalPosition_x) },
+        { "Transform::m_LocalPosition.y", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_m_LocalPosition_y) },
+        { "Transform::m_LocalPosition.z", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_m_LocalPosition_z) },
+        { "Transform::m_LocalScale.x", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_m_LocalScale_x) },
+        { "Transform::m_LocalScale.y", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_m_LocalScale_y) },
+        { "Transform::m_LocalScale.z", new PropertyKeyInfo(AnimationPropertyType.Float, AnimationPropertyKey.Transform_m_LocalScale_z) },
+    };
+
+    public static GameObject GameObjectFromPath(GameObject gameObject, string path)
+    {
+        var rv = gameObject;
+
+        if (path.Length == 0)
+        {
+            return rv;
+        }
+
+        var parts = path.Split('/');
+
+        foreach(var part in parts)
+        {
+            if (part == "")
+            {
+                throw new Exception("Invalid part " + part + " in " + path);
+            }
+            bool found = false;
+
+            for (int childNum = 0; childNum < rv.transform.childCount; childNum++)
+            {
+                var child = rv.transform.GetChild(childNum);
+                if (child.name == part)
+                {
+                    found = true;
+                    rv = child.gameObject;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                rv = null;
+                break;
+            }
+        }
+
+        return rv;
+    }
+
+    [MenuItem("Dreamcast/Export Hierarchy")]
+    public static void ProcessHierarchy()
+    {
+        DreamScene ds = CollectScene();
+
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("#include <vector>");
+        sb.AppendLine("#include \"dcue/types-native.h\"");
+        sb.AppendLine("using namespace native;");
+        sb.AppendLine("void InitializeHierarchy(std::vector<game_object_t*> gameObjects) {");
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            var gameObject = ds.gameObjects[gameObjectNum];
+            if (gameObject.transform.parent != null)
+            {
+                sb.AppendLine($" gameObjects[{gameObjectNum}]->parent = gameObjects[{ds.gameObjectIndex[gameObject.transform.parent.gameObject]}];");
+            }
+            var position = gameObject.transform.localPosition;
+            var rotation = gameObject.transform.localEulerAngles;
+            var scale = gameObject.transform.localScale;
+            sb.AppendLine($" gameObjects[{gameObjectNum}]->position = r_vector3_t{{{position.x}, {position.y}, {position.z}}};");
+            sb.AppendLine($" gameObjects[{gameObjectNum}]->rotation = r_vector3_t{{{rotation.x}, {rotation.y}, {rotation.z}}};");
+            sb.AppendLine($" gameObjects[{gameObjectNum}]->scale = r_vector3_t{{{scale.x}, {scale.y}, {scale.z}}};");
+        }
+        sb.AppendLine("}");
+
+        File.WriteAllText("hierarchy.cpp", sb.ToString());
+    }
+
+    [MenuItem("Dreamcast/Export Animations")]
+    public static void ProcessAnimations()
+    {
+        DreamScene ds = CollectScene();
+
+        StringBuilder sb = new StringBuilder();
+
+        sb.AppendLine("#include \"anim.h\"");
+        sb.AppendLine();
+
+        var rgo = SceneManager.GetActiveScene().GetRootGameObjects();
+
+        var animators = new List<Animator>();
+
+        foreach (var go in rgo) {
+            animators.AddRange(go.GetComponentsInChildren<Animator>(true));
+        }
+
+        var animationClips = new HashSet<AnimationClip>();
+        var animatiorControllers = new HashSet<AnimatorController>();
+
+        for (int animatorNum = 0; animatorNum < animators.Count; animatorNum++)
+        {
+            var animator = animators[animatorNum];
+
+            var animatorController = animator.runtimeAnimatorController as AnimatorController;
+
+            if (animatorController == null || animatorController.animationClips.Length == 0)
+                continue;
+
+            animatiorControllers.Add(animatorController);
+
+
+            foreach (var animationClip in animatorController.animationClips)
+            {
+                animationClips.Add(animationClip);
+            }
+        }
+        Debug.Log("animationClips: " + animationClips.Count);
+        Debug.Log("animatiorControllers: " + animatiorControllers.Count);
+
+        foreach (var animatorController in animatiorControllers)
+        {
+            if (animatorController.layers.Length > 1)
+            {
+                throw new Exception("Too many layers");
+            }
+
+            if (animatorController.layers.Length == 0)
+                continue;
+
+            var stateMachine = animatorController.layers[0].stateMachine;
+
+            if (stateMachine.stateMachines.Length > 0)
+            {
+                throw new Exception("Nested state machines");
+            }
+
+            // stateMachine.defaultState;
+
+            foreach (ChildAnimatorState childState in stateMachine.states)
+            {
+                if (childState.state.transitions.Length != 0)
+                    throw new Exception("State has Transistion");
+                
+                // For the future
+                foreach (var transition in childState.state.transitions)
+                {
+                    if (!transition.hasExitTime)
+                    {
+                        throw new Exception("!transition.hasExitTime.");
+                    }
+                }
+            }
+        }
+
+        var animationClipsList = new List<AnimationClip>(animationClips);
+        var animationClipIndex = new Dictionary<AnimationClip,  int>();
+        /*
+         * Animation anim_%i = {
+         *  {
+         *   {
+         *    { times... },
+         *    { values... },
+         *    num_frames, offset,
+         *   },
+         *  ....
+         *  },
+         *  num_targets,
+         * };
+         */
+        for (int animationClipNum = 0; animationClipNum < animationClipsList.Count; animationClipNum++)
+        {
+            var animationClip = animationClipsList[animationClipNum];
+
+            animationClipIndex.Add(animationClip, animationClipNum);
+
+            sb.AppendLine();
+            sb.AppendLine($"//Animation {animationClip.name}");
+
+            EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(animationClip);
+
+            StringBuilder animationStringBuilder = new StringBuilder();
+
+            animationStringBuilder.AppendLine();
+            animationStringBuilder.AppendLine($"static animation_track_t anim_{animationClipNum}_tracks[] = {{");
+
+            var timesValuesToName = new Dictionary<string, string>();
+
+            int numTargets = 0;
+            for (int curveBindingNum = 0; curveBindingNum < curveBindings.Length; curveBindingNum++)
+            {
+                EditorCurveBinding binding = curveBindings[curveBindingNum];
+                // Retrieve the animation curve for this binding
+                AnimationCurve curve = AnimationUtility.GetEditorCurve(animationClip, binding);
+
+                var propertyKey = $"{binding.type.Name}::{binding.propertyName}";
+                if (!knownPropertyKeys.ContainsKey(propertyKey))
+                {
+                    throw new Exception($"Unsupported propertyKey {propertyKey}");
+                }
+
+                var propertyKeyInfo = knownPropertyKeys[propertyKey];
+
+                if (propertyKeyInfo.Ignored)
+                {
+                    continue;
+                }
+
+                if (propertyKeyInfo.type != AnimationPropertyType.Float)
+                {
+                    throw new Exception("Unsupported propertyKeyInfo");
+                }
+
+                numTargets++;
+                //Debug.Log($" Binding: {binding.path} Property: {binding.propertyName} Type: {binding.type.Name} | Time: {key.time} Value: {key.value}");
+
+                animationStringBuilder.AppendLine(" {");
+
+                StringBuilder timesStringBuilder = new StringBuilder();
+
+                timesStringBuilder.Append($" = {{");
+                // Enumerate through all keyframes in this curve
+                foreach (Keyframe key in curve.keys)
+                {
+                    timesStringBuilder.Append($"{key.time}, ");
+                }
+                timesStringBuilder.AppendLine("};");
+
+                var timesString = timesStringBuilder.ToString();
+
+                if (!timesValuesToName.ContainsKey(timesString))
+                {
+                    string name = $"anim_{animationClipNum}_track_{curveBindingNum}_times";
+                    sb.Append("float ");
+                    sb.Append(name);
+                    sb.Append("[]");
+                    sb.AppendLine(timesString);
+
+                    timesValuesToName.Add(timesString, name);
+                }
+
+                sb.Append($"float anim_{animationClipNum}_track_{curveBindingNum}_values[] = {{");
+                // Enumerate through all keyframes in this curve
+                foreach (Keyframe key in curve.keys)
+                {
+                    sb.Append($"{key.value}, ");
+                }
+                sb.AppendLine("};");
+
+                
+                animationStringBuilder.AppendLine($"  {timesValuesToName[timesString]},");
+                animationStringBuilder.AppendLine($"  anim_{animationClipNum}_track_{curveBindingNum}_values,");
+                animationStringBuilder.AppendLine($"  {curve.keys.Length}, {propertyKeyInfo.key},");
+
+                animationStringBuilder.AppendLine(" },");
+            }
+            animationStringBuilder.AppendLine("};");
+
+            animationStringBuilder.AppendLine();
+            animationStringBuilder.AppendLine($"static animation_t anim_{animationClipNum} = {{");
+            animationStringBuilder.AppendLine($" anim_{animationClipNum}_tracks,");
+            animationStringBuilder.AppendLine($" {numTargets},");
+            animationStringBuilder.AppendLine("};");
+
+            sb.AppendLine();
+            sb.AppendLine(animationStringBuilder.ToString());
+        }
+
+        for (int animatorNum = 0; animatorNum < animators.Count; animatorNum++)
+        {
+            var animator = animators[animatorNum];
+            var animatorController = animator.runtimeAnimatorController as AnimatorController;
+            if (animatorController is null)
+            {
+                continue;
+            }
+
+            sb.AppendLine();
+            sb.AppendLine($"//{animator.name} bound to {animatorController.name} (these are offsets to game_objects)");
+            for (int clipNum = 0; clipNum < animatorController.animationClips.Length; clipNum++)
+            {
+                var animationClip = animatorController.animationClips[clipNum];
+
+                sb.Append($"static size_t animator_{animatorNum}_binding_{clipNum}[] = {{");
+
+                EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(animationClip);
+
+                for (int curveBindingNum = 0; curveBindingNum < curveBindings.Length; curveBindingNum++)
+                {
+                    EditorCurveBinding binding = curveBindings[curveBindingNum];
+                    // Retrieve the animation curve for this binding
+                    AnimationCurve curve = AnimationUtility.GetEditorCurve(animationClip, binding);
+
+                    var propertyKey = $"{binding.type.Name}::{binding.propertyName}";
+                    if (!knownPropertyKeys.ContainsKey(propertyKey))
+                    {
+                        throw new Exception($"Unsupported propertyKey {propertyKey}");
+                    }
+
+                    var propertyKeyInfo = knownPropertyKeys[propertyKey];
+
+                    if (propertyKeyInfo.Ignored)
+                    {
+                        continue;
+                    }
+
+                    var boundGO = GameObjectFromPath(animator.gameObject, binding.path);
+                    //Debug.Log($"path: {binding.path}: bound: {boundGO}");
+                    if (boundGO != null )
+                    {
+                        sb.Append($"{ds.gameObjectIndex[boundGO]}, ");
+                    }
+                    else
+                    {
+                        sb.Append("SIZE_MAX, ");
+                    }
+                }
+                sb.AppendLine("};");
+            }
+
+
+
+            for (int clipNum = 0; clipNum < animatorController.animationClips.Length; clipNum++)
+            {
+                var animationClip = animatorController.animationClips[clipNum];
+                EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(animationClip);
+
+                sb.AppendLine($"unsigned animator_{animatorNum}_clip_{clipNum}_current_frames[{curveBindings.Length}];");
+            }
+
+            sb.Append($"static bound_animation_t animator_{animatorNum}_bindlist[] = {{ ");
+
+            for (int clipNum = 0; clipNum < animatorController.animationClips.Length; clipNum++)
+            {
+                var animationClip = animatorController.animationClips[clipNum];
+
+                sb.Append($"{{ &anim_{animationClipIndex[animationClip]}, animator_{animatorNum}_binding_{clipNum}, animator_{animatorNum}_clip_{clipNum}_current_frames }}, ");
+            }
+            sb.AppendLine("};");
+
+            sb.AppendLine();
+            sb.AppendLine($"static animator_t animator_{animatorNum} = {{ animator_{animatorNum}_bindlist, {animatorController.animationClips.Length} }};");
+        }
+
+        sb.AppendLine();
+        sb.Append($"std::vector<animator_t*> animators = {{ ");
+        for (int animatorNum = 0; animatorNum < animators.Count; animatorNum++)
+        {
+            var animator = animators[animatorNum];
+            var animatorController = animator.runtimeAnimatorController as AnimatorController;
+            if (animatorController is null)
+            {
+                continue;
+            }
+            sb.Append($"&animator_{animatorNum}, ");
+        }
+        sb.AppendLine("};");
+
+        // write all text to anim.cpp
+        File.WriteAllText("anim.cpp", sb.ToString());
+    }
+
     static bool ArraysEqual<T>(T[] a1, T[] a2)
     {
         if (ReferenceEquals(a1, a2))
@@ -201,6 +650,18 @@ public class DreamExporter : MonoBehaviour
         public HashSet<DreamMesh> meshes = new HashSet<DreamMesh>();
         public HashSet<DreamTerrainData> terrains = new HashSet<DreamTerrainData>();
         public List<GameObject> gameObjects = new List<GameObject>();
+
+        public List<Texture> textureList;
+        public List<Material> materialList;
+        public List<DreamMesh> meshList;
+        public List<DreamTerrainData> terrainList;
+
+        public Dictionary<Texture, int> textureIndex;
+        public Dictionary<Material, int> materialIndex;
+        public Dictionary<DreamMesh, int> meshIndex;
+        public Dictionary<DreamTerrainData, int> terrainIndex;
+        public Dictionary<GameObject, int> gameObjectIndex;
+
     }
 
     static Texture2D GetReadableTexture(Texture source)
@@ -226,11 +687,9 @@ public class DreamExporter : MonoBehaviour
     }
 
 
-    [MenuItem("Dreamcast/Export Scene")]
-    static void ExportScene()
+    static DreamScene CollectScene()
     {
-        Debug.Log("Collecting ...");
-        DreamScene ds = new DreamScene();
+        var ds = new DreamScene();
         Scene scene = SceneManager.GetActiveScene();
         if (scene != null)
         {
@@ -241,33 +700,45 @@ public class DreamExporter : MonoBehaviour
             }
         }
 
-        // Create lists (for consistent ordering) and dictionaries (for lookups)
-        List<Texture> textureList = new List<Texture>(ds.textures);
-        List<Material> materialList = new List<Material>(ds.materials);
+        ds.textureList = new List<Texture>(ds.textures);
+        ds.materialList = new List<Material>(ds.materials);
 
-        List<DreamMesh> meshList = new List<DreamMesh>(ds.meshes);
-        List<DreamTerrainData> terrainList = new List<DreamTerrainData>(ds.terrains);
+        ds.meshList = new List<DreamMesh>(ds.meshes);
+        ds.terrainList = new List<DreamTerrainData>(ds.terrains);
 
-        Dictionary<Texture, int> textureIndex = new Dictionary<Texture, int>();
-        for (int i = 0; i < textureList.Count; i++)
+        ds.textureIndex = new Dictionary<Texture, int>();
+        for (int i = 0; i < ds.textureList.Count; i++)
         {
-            textureIndex[textureList[i]] = i;
+            ds.textureIndex[ds.textureList[i]] = i;
         }
-        Dictionary<Material, int> materialIndex = new Dictionary<Material, int>();
-        for (int i = 0; i < materialList.Count; i++)
+        ds.materialIndex = new Dictionary<Material, int>();
+        for (int i = 0; i < ds.materialList.Count; i++)
         {
-            materialIndex[materialList[i]] = i;
+            ds.materialIndex[ds.materialList[i]] = i;
         }
-        Dictionary<DreamMesh, int> meshIndex = new Dictionary<DreamMesh, int>();
-        for (int i = 0; i < meshList.Count; i++)
+        ds.meshIndex = new Dictionary<DreamMesh, int>();
+        for (int i = 0; i < ds.meshList.Count; i++)
         {
-            meshIndex[meshList[i]] = i;
+            ds.meshIndex[ds.meshList[i]] = i;
         }
-        Dictionary<DreamTerrainData, int> terrainIndex = new Dictionary<DreamTerrainData, int>();
-        for (int i = 0; i < terrainList.Count; i++)
+        ds.terrainIndex = new Dictionary<DreamTerrainData, int>();
+        for (int i = 0; i < ds.terrainList.Count; i++)
         {
-            terrainIndex[terrainList[i]] = i;
+            ds.terrainIndex[ds.terrainList[i]] = i;
         }
+        ds.gameObjectIndex = new Dictionary<GameObject, int>();
+        for (int i = 0; i < ds.gameObjects.Count; i++)
+        {
+            ds.gameObjectIndex[ds.gameObjects[i]] = i;
+        }
+        return ds;
+    }
+
+    [MenuItem("Dreamcast/Export Scene")]
+    static void ExportScene()
+    {
+        Debug.Log("Collecting ...");
+        DreamScene ds = CollectScene();
 
         Debug.Log("Exporting ...");
         // Write binary file with header "DCUE0002"
@@ -280,8 +751,8 @@ public class DreamExporter : MonoBehaviour
             // --------------------
             // Write Textures Section
             // --------------------
-            writer.Write(textureList.Count);
-            foreach (Texture tex in textureList)
+            writer.Write(ds.textureList.Count);
+            foreach (Texture tex in ds.textureList)
             {
                 // Write asset path as a length-prefixed string
                 string assetPath = AssetDatabase.GetAssetPath(tex);
@@ -315,8 +786,8 @@ public class DreamExporter : MonoBehaviour
             // --------------------
             // Write Materials Section
             // --------------------
-            writer.Write(materialList.Count);
-            foreach (Material mat in materialList)
+            writer.Write(ds.materialList.Count);
+            foreach (Material mat in ds.materialList)
             {
                 // Write material color components (as floats)
                 Color col = mat.color;
@@ -327,19 +798,19 @@ public class DreamExporter : MonoBehaviour
 
                 // Write whether the material has a main texture.
                 // If so, write the index of that texture.
-                bool hasTexture = (mat.mainTexture != null) && textureIndex.ContainsKey(mat.mainTexture);
+                bool hasTexture = (mat.mainTexture != null) && ds.textureIndex.ContainsKey(mat.mainTexture);
                 writer.Write(hasTexture);
                 if (hasTexture)
                 {
-                    writer.Write(textureIndex[mat.mainTexture]);
+                    writer.Write(ds.textureIndex[mat.mainTexture]);
                 }
             }
 
             // --------------------
             // Write Meshes Section
             // --------------------
-            writer.Write(meshList.Count);
-            foreach (DreamMesh dmesh in meshList)
+            writer.Write(ds.meshList.Count);
+            foreach (DreamMesh dmesh in ds.meshList)
             {
                 var mesh = dmesh.mesh;
 
@@ -577,11 +1048,11 @@ public class DreamExporter : MonoBehaviour
                 }
                 writer.Write(meshEnabled);
                 // Write mesh index if mesh exists, else flag false.
-                bool hasMesh = (mesh != null) && meshIndex.ContainsKey(mesh);
+                bool hasMesh = (mesh != null) && ds.meshIndex.ContainsKey(mesh);
                 writer.Write(hasMesh);
                 if (hasMesh)
                 {
-                    writer.Write(meshIndex[mesh]);
+                    writer.Write(ds.meshIndex[mesh]);
                 }
                 // Write material index if material exists.
                 writer.Write((int)materials.Length);
@@ -589,7 +1060,7 @@ public class DreamExporter : MonoBehaviour
                 {
                     if (material != null)
                     {
-                        writer.Write(materialIndex[material]);
+                        writer.Write(ds.materialIndex[material]);
                     }
                     else
                     {
@@ -611,8 +1082,8 @@ public class DreamExporter : MonoBehaviour
 
 
                     var dterraindata = new DreamTerrainData(tdata, mat.mainTextureScale, mat.mainTextureOffset);
-                    writer.Write(terrainIndex[dterraindata]);
-                    writer.Write(materialIndex[mat]);
+                    writer.Write(ds.terrainIndex[dterraindata]);
+                    writer.Write(ds.materialIndex[mat]);
                 } else
                 {
                     writer.Write((int)-1);
