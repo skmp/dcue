@@ -7,6 +7,7 @@
 
 #include "dc/pvr.h"
 
+struct component_t;
 namespace native {
     struct texture_t {
         uint32_t flags;
@@ -60,19 +61,64 @@ namespace native {
         };
     };
 
+    // TODO: proper place
+    inline void invertGeneral(r_matrix_t *dst, const r_matrix_t *src)
+    {
+        float det, invdet;
+        // calculate a few cofactors
+        dst->right.x = src->up.y*src->at.z - src->up.z*src->at.y;
+        dst->right.y = src->at.y*src->right.z - src->at.z*src->right.y;
+        dst->right.z = src->right.y*src->up.z - src->right.z*src->up.y;
+        // get the determinant from that
+        det = src->up.x * dst->right.y + src->at.x * dst->right.z + dst->right.x * src->right.x;
+        invdet = 1.0;
+        if(det != 0.0f)
+            invdet = 1.0f/det;
+        dst->right.x *= invdet;
+        dst->right.y *= invdet;
+        dst->right.z *= invdet;
+        dst->up.x = invdet * (src->up.z*src->at.x - src->up.x*src->at.z);
+        dst->up.y = invdet * (src->at.z*src->right.x - src->at.x*src->right.z);
+        dst->up.z = invdet * (src->right.z*src->up.x - src->right.x*src->up.z);
+        dst->at.x = invdet * (src->up.x*src->at.y - src->up.y*src->at.x);
+        dst->at.y = invdet * (src->at.x*src->right.y - src->at.y*src->right.x);
+        dst->at.z = invdet * (src->right.x*src->up.y - src->right.y*src->up.x);
+        dst->pos.x = -(src->pos.x*dst->right.x + src->pos.y*dst->up.x + src->pos.z*dst->at.x);
+        dst->pos.y = -(src->pos.x*dst->right.y + src->pos.y*dst->up.y + src->pos.z*dst->at.y);
+        dst->pos.z = -(src->pos.x*dst->right.z + src->pos.y*dst->up.z + src->pos.z*dst->at.z);
+
+        dst->at_w = 0;
+        dst->up_w = 0;
+        dst->right_w = 0;
+        dst->pos_w = 1;
+    }
+
+    enum game_object_inactive_t {
+        goi_active = 0,
+        goi_inactive = 1,
+        goi_inactive_parent = 2
+    };
+    
     struct game_object_t {
         r_matrix_t ltw;
         r_vector3_t position;
         r_vector3_t rotation;
         r_vector3_t scale;
         game_object_t* parent;
+        size_t* children;
+        component_t* components;
         unsigned ltw_stamp;
 
         mesh_t* mesh;
         material_t** materials;
         size_t submesh_count;
-        bool active;
+        /*game_object_inactive_t*/ unsigned inactiveFlags;
         bool mesh_enabled;
+
+        bool isActive() const;
+
+        void setActive(bool active);
+        void computeActiveState();
     };
 
     struct MeshInfo {

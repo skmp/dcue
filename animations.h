@@ -2,6 +2,9 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+namespace native {
+    struct game_object_t;
+}
 
 enum animation_property_key
 {
@@ -60,8 +63,11 @@ struct bound_animation_t {
 };
 
 struct animator_t {
+    native::game_object_t* gameObject;
+
     bound_animation_t* bound_animations;
     size_t num_bound_animations;
+    size_t gameObjectIndex;
     float currentTime;
 
     void update(float deltaTime);

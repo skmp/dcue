@@ -258,7 +258,7 @@ void pvr_begin_queued_render(void) {
     // XXX Do we _really_ need this every time?
     // SETREG(PVR_FB_CFG_2, 0x00000009);        /* Alpha mode */
 
-    printf("VERBUF_FREE: %d, OPB_FREE: %d\n", PVR_GET(PVR_TA_VERTBUF_END) - PVR_GET(PVR_TA_VERTBUF_POS), PVR_GET(PVR_TA_OPB_END) - PVR_GET(PVR_TA_OPB_POS)*4);
+    fprintf(stderr, "VERBUF_FREE: %d, OPB_FREE: %d\n", PVR_GET(PVR_TA_VERTBUF_END) - PVR_GET(PVR_TA_VERTBUF_POS), PVR_GET(PVR_TA_OPB_END) - PVR_GET(PVR_TA_OPB_POS)*4);
     if (!pvr_state.isp_start_callback || pvr_state.isp_start_callback())
         PVR_SET(PVR_ISP_START, PVR_ISP_START_GO);   /* Start render */
 }

@@ -16,7 +16,11 @@
 #include <cstring>
 #include <chrono>
 
-#include "anim.h"
+#include "animations.h"
+#include "hierarchy.h"
+#include "components.h"
+#include "scripts.h"
+#include "cameras.h"
 
 #define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
 
@@ -257,7 +261,11 @@ bool loadScene(const char* scene) {
     gameObjects.resize(gameObjectCount);
     for (uint32_t i = 0; i < gameObjectCount; ++i) {
         auto go = gameObjects[i] = new game_object_t();
-        in.read((char*)&go->active, sizeof(go->active));
+		bool active;
+        in.read((char*)&active, sizeof(active));
+		if (!active) {
+			go->inactiveFlags = goi_inactive;
+		}
         in.read(reinterpret_cast<char*>(&go->ltw.m00), 16 * sizeof(float));
         in.read((char*)&go->mesh_enabled, sizeof(go->mesh_enabled));
 
@@ -297,14 +305,6 @@ bool loadScene(const char* scene) {
     return true;
 }
 
-
-matrix_t DCE_MAT_SCREENVIEW = {
-    { 1, 0, 0, 0},
-    { 0, 1, 0, 0},
-    { 0, 0, 1, 0},
-    { 0, 0, 0, 1}
-};
-
 matrix_t DCE_MESHLET_MAT_DECODE = {
 	{ 1.0f/256, 0.0f, 0.0f, 0.0f},
 	{ 0.0f, 1.0f/256, 0.0f, 0.0f},
@@ -340,13 +340,13 @@ void dce_set_mat_vertex_color(const RGBAf* residual, const RGBAf* material) {
 	DCE_MESHLET_MAT_VERTEX_COLOR[3][3] = residual->alpha;
 }
 
-void DCE_MatrixViewport(float x, float y, float width, float height) {
-    DCE_MAT_SCREENVIEW[0][0] = -width * 0.5f;
-    DCE_MAT_SCREENVIEW[1][1] = height * 0.5f;
-    DCE_MAT_SCREENVIEW[2][2] = 1;
-    DCE_MAT_SCREENVIEW[3][0] = -DCE_MAT_SCREENVIEW[0][0] + x;
-    DCE_MAT_SCREENVIEW[3][1] = height - (DCE_MAT_SCREENVIEW[1][1] + y); 
-}
+// void DCE_MatrixViewport(float x, float y, float width, float height) {
+//     DCE_MAT_SCREENVIEW[0][0] = -width * 0.5f;
+//     DCE_MAT_SCREENVIEW[1][1] = height * 0.5f;
+//     DCE_MAT_SCREENVIEW[2][2] = 1;
+//     DCE_MAT_SCREENVIEW[3][0] = -DCE_MAT_SCREENVIEW[0][0] + x;
+//     DCE_MAT_SCREENVIEW[3][1] = height - (DCE_MAT_SCREENVIEW[1][1] + y); 
+// }
 
 // These /really/ depend on the compiler to optimize the constants out in order to be fast
 // Ugly, but works
@@ -1753,262 +1753,6 @@ r_matrix_t diffusePos {
     0, 3, 0, 1
 };
 
-void invertGeneral(r_matrix_t *dst, const r_matrix_t *src)
-{
-	float det, invdet;
-	// calculate a few cofactors
-	dst->right.x = src->up.y*src->at.z - src->up.z*src->at.y;
-	dst->right.y = src->at.y*src->right.z - src->at.z*src->right.y;
-	dst->right.z = src->right.y*src->up.z - src->right.z*src->up.y;
-	// get the determinant from that
-	det = src->up.x * dst->right.y + src->at.x * dst->right.z + dst->right.x * src->right.x;
-	invdet = 1.0;
-	if(det != 0.0f)
-		invdet = 1.0f/det;
-	dst->right.x *= invdet;
-	dst->right.y *= invdet;
-	dst->right.z *= invdet;
-	dst->up.x = invdet * (src->up.z*src->at.x - src->up.x*src->at.z);
-	dst->up.y = invdet * (src->at.z*src->right.x - src->at.x*src->right.z);
-	dst->up.z = invdet * (src->right.z*src->up.x - src->right.x*src->up.z);
-	dst->at.x = invdet * (src->up.x*src->at.y - src->up.y*src->at.x);
-	dst->at.y = invdet * (src->at.x*src->right.y - src->at.y*src->right.x);
-	dst->at.z = invdet * (src->right.x*src->up.y - src->right.y*src->up.x);
-	dst->pos.x = -(src->pos.x*dst->right.x + src->pos.y*dst->up.x + src->pos.z*dst->at.x);
-	dst->pos.y = -(src->pos.x*dst->right.y + src->pos.y*dst->up.y + src->pos.z*dst->at.y);
-	dst->pos.z = -(src->pos.x*dst->right.z + src->pos.y*dst->up.z + src->pos.z*dst->at.z);
-
-    dst->at_w = 0;
-    dst->up_w = 0;
-    dst->right_w = 0;
-    dst->pos_w = 1;
-}
-
-struct Camera {
-    matrix_t devViewProjScreen;
-    Plane frustumPlanes[6];
-
-    game_object_t* go;
-
-    float nearPlane;
-    float farPlane;
-    V2d viewOffset;
-    V2d viewWindow;
-    V3d frustumCorners[8];
-
-
-    void buildPlanes()
-    {
-        V3d *c = frustumCorners;
-        Plane *p = frustumPlanes;
-        V3d v51 = sub(c[1], c[5]);
-        V3d v73 = sub(c[3], c[7]);
-
-        /* Far plane */
-        p[0].normal = go->ltw.at;
-        p[0].distance = dot(p[0].normal, c[4]);
-
-        /* Near plane */
-        p[1].normal = neg(p[0].normal);
-        p[1].distance = dot(p[1].normal, c[0]);
-
-        /* Right plane */
-        p[2].normal = normalize(cross(v51,
-                                            sub(c[6], c[5])));
-        p[2].distance = dot(p[2].normal, c[1]);
-
-        /* Top plane */
-        p[3].normal = normalize(cross(sub(c[4], c[5]),
-                                            v51));
-        p[3].distance = dot(p[3].normal, c[1]);
-
-        /* Left plane */
-        p[4].normal = normalize(cross(v73,
-                                            sub(c[4], c[7])));
-        p[4].distance = dot(p[4].normal, c[3]);
-
-        /* Bottom plane */
-        p[5].normal = normalize(cross(sub(c[6], c[7]),
-                                            v73));
-        p[5].distance = dot(p[5].normal, c[3]);
-    }
-
-    void buildClipPersp()
-    {
-        /* First we calculate the 4 points on the view window. */
-        V3d up = scale(go->ltw.up, viewWindow.y);
-        V3d left = scale(go->ltw.right, viewWindow.x);
-        V3d *c = frustumCorners;
-        c[0] = add(add(go->ltw.at, up), left);	// top left
-        c[1] = sub(add(go->ltw.at, up), left);	// top right
-        c[2] = sub(sub(go->ltw.at, up), left);	// bottom right
-        c[3] = add(sub(go->ltw.at, up), left);	// bottom left
-
-        /* Now Calculate near and far corners. */
-        V3d off = sub(scale(go->ltw.up, viewOffset.y),
-                    scale(go->ltw.right, viewOffset.x));
-        for(int32 i = 0; i < 4; i++){
-            V3d corner = sub(frustumCorners[i], off);
-            V3d pos = add(go->ltw.pos, off);
-            c[i] = add(scale(corner, nearPlane), pos);
-            c[i+4] = add(scale(corner, farPlane), pos);
-        }
-
-		buildPlanes();
-    }
-
-    void setFOV(float hfov, float ratio)
-    {
-        float w, h;
-
-        w = (float)640;
-        h = (float)480;
-        if(w < 1 || h < 1){
-            w = 1;
-            h = 1;
-        }
-        hfov = hfov*3.14159f/360.0f;	// deg to rad and halved
-
-        float ar1 = 4.0f/3.0f;
-        float ar2 = w/h;
-        float vfov = atanf(tanf(hfov/2) / ar1) *2;
-        hfov = atanf(tanf(vfov/2) * ar2) *2;
-
-        float a = tanf(hfov);
-        viewWindow = { a, a/ratio };
-        viewOffset = { 0.0f, 0.0f };
-    }
-
-
-    void beforeRender() {
-        buildClipPersp();
-        
-        // calculate devViewProjScreen
-		alignas(8) float view[16], proj[16];
-
-        // View Matrix
-        r_matrix_t inv;
-        invertGeneral(&inv, &go->ltw);
-        // Since we're looking into positive Z,
-        // flip X to ge a left handed view space.
-        view[0]  = -inv.right.x;
-        view[1]  =  -inv.right.y;
-        view[2]  =  inv.right.z;
-        view[3]  =  0.0f;
-        view[4]  = -inv.up.x;
-        view[5]  =  -inv.up.y;
-        view[6]  =  inv.up.z;
-        view[7]  =  0.0f;
-        view[8]  =  -inv.at.x;
-        view[9]  =   -inv.at.y;
-        view[10] =  inv.at.z;
-        view[11] =  0.0f;
-        view[12] = -inv.pos.x;
-        view[13] =  -inv.pos.y;
-        view[14] =  inv.pos.z;
-        view[15] =  1.0f;
-    
-        // Projection Matrix
-        float invwx = 1.0f/viewWindow.x;
-        float invwy = 1.0f/viewWindow.y;
-        float invz = 1.0f/(farPlane-nearPlane);
-    
-        proj[0] = invwx;
-        proj[1] = 0.0f;
-        proj[2] = 0.0f;
-        proj[3] = 0.0f;
-    
-        proj[4] = 0.0f;
-        proj[5] = invwy;
-        proj[6] = 0.0f;
-        proj[7] = 0.0f;
-    
-        proj[8] = viewOffset.x*invwx;
-        proj[9] = viewOffset.y*invwy;
-        proj[12] = -proj[8];
-        proj[13] = -proj[9];
-        if(true /*projection == Camera::PERSPECTIVE*/){
-            proj[10] = farPlane*invz;
-            proj[11] = 1.0f;
-    
-            proj[15] = 0.0f;
-        }else{
-            proj[10] = invz;
-            proj[11] = 0.0f;
-    
-            proj[15] = 1.0f;
-        }
-        proj[14] = -nearPlane*proj[10];
-        
-        DCE_MatrixViewport(0, 0, 640, 480);
-        
-        mat_load((matrix_t*)&DCE_MAT_SCREENVIEW);
-        mat_apply((matrix_t*)&proj[0]);
-        mat_apply((matrix_t*)&view[0]);
-        mat_store((matrix_t*)&devViewProjScreen);
-    }
-    
-    enum { SPHEREOUTSIDE, SPHEREBOUNDARY, SPHEREINSIDE, SPHEREBOUNDARY_NEAR /* frustumTestSphereEx only */};
-
-    int frustumTestSphere(const Sphere *s) const
-    {
-        int res = SPHEREINSIDE;
-        const Plane *p = this->frustumPlanes;
-        for(int32 i = 0; i < 6; i++){
-            float dist = dot(p->normal, s->center) - p->distance;
-            if(s->radius < dist)
-                return SPHEREOUTSIDE;
-            if(s->radius > -dist)
-                res = SPHEREBOUNDARY;
-            p++;
-        }
-        return res;
-    }
-
-    int frustumTestSphereNear(const Sphere *s) const
-    {
-        int res = SPHEREINSIDE;
-        const Plane *p = this->frustumPlanes;
-    
-        // far
-        float dist = dot(p->normal, s->center) - p->distance;
-        if(s->radius < dist)
-            return SPHEREOUTSIDE;
-        p++;
-    
-        // near
-        dist = dot(p->normal, s->center) - p->distance;
-        if(s->radius < dist)
-            return SPHEREOUTSIDE;
-        if(s->radius > -dist)
-            res = SPHEREBOUNDARY_NEAR;
-        p++;
-    
-        // others
-        dist = dot(p->normal, s->center) - p->distance;
-        if(s->radius < dist)
-            return SPHEREOUTSIDE;
-        p++;
-    
-        dist = dot(p->normal, s->center) - p->distance;
-        if(s->radius < dist)
-            return SPHEREOUTSIDE;
-        p++;
-    
-        dist = dot(p->normal, s->center) - p->distance;
-        if(s->radius < dist)
-            return SPHEREOUTSIDE;
-        p++;
-    
-        dist = dot(p->normal, s->center) - p->distance;
-        if(s->radius < dist)
-            return SPHEREOUTSIDE;
-        p++;
-    
-        return res;
-    }
-};
-
 size_t vertexBufferFree() {
     size_t end   = PVR_GET(PVR_TA_VERTBUF_END);
     size_t pos   = PVR_GET(PVR_TA_VERTBUF_POS);
@@ -2055,7 +1799,7 @@ float GetMaxScale(const r_matrix_t& mat) {
 }
 
 template<int list>
-void renderMesh(Camera* cam, game_object_t* go) {
+void renderMesh(camera_t* cam, game_object_t* go) {
     if (vertexBufferFree() < freeVertexTarget) {
         return;
     }
@@ -2068,10 +1812,10 @@ void renderMesh(Camera* cam, game_object_t* go) {
     float maxScaleFactor = GetMaxScale(go->ltw);
     sphere.radius *= maxScaleFactor;
     auto global_visible = cam->frustumTestSphereNear(&sphere);
-    if (global_visible == Camera::SPHEREOUTSIDE) {
+    if (global_visible == camera_t::SPHEREOUTSIDE) {
         // printf("Outside frustum cull (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
         return;
-    } else if (global_visible == Camera::SPHEREINSIDE) {
+    } else if (global_visible == camera_t::SPHEREINSIDE) {
         global_needsNoClip = true;
     } else {
         // printf("Needs local clip (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
@@ -2183,12 +1927,12 @@ void renderMesh(Camera* cam, game_object_t* go) {
                 mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
                 sphere.radius *= maxScaleFactor;
                 auto local_frustumTestResult = cam->frustumTestSphereNear(&sphere);
-                if ( local_frustumTestResult == Camera::SPHEREOUTSIDE) {
+                if ( local_frustumTestResult == camera_t::SPHEREOUTSIDE) {
                     // printf("Outside local frustum cull\n");
                     continue;
                 }
 
-                if (local_frustumTestResult == Camera::SPHEREBOUNDARY_NEAR) {
+                if (local_frustumTestResult == camera_t::SPHEREBOUNDARY_NEAR) {
                     clippingRequired = 1 + textured;
                 }
             }
@@ -2349,7 +2093,83 @@ void animator_t::update(float deltaTime) {
     }
 }
 
-void InitializeHierarchy(std::vector<game_object_t*> gameObjects);
+bool native::game_object_t::isActive() const {
+	if (inactiveFlags & goi_inactive) {
+		return false;
+	} else if (parent) {
+		return parent->isActive();
+	}
+	return true;
+}
+
+void native::game_object_t::computeActiveState() {
+	// if (inactiveFlags & goi_inactive) {
+
+	// }
+}
+
+void native::game_object_t::setActive(bool active) {
+	inactiveFlags = !active ? goi_inactive : 0;
+	// if (active && (inactiveFlags & goi_inactive)) {
+	// 	inactiveFlags &= ~goi_inactive;
+	// 	if (!inactiveFlags) {
+	// 		// enable children
+	// 		std::cout << "enable children" << std::endl;
+	// 	}
+	// }else if (!active && !(inactive & goi_inactive)) {
+	// 	inactive |= goi_inactive;
+	// 	if (inactive) {
+	// 		// disable children
+	// 		std::cout << "disable children" << std::endl;
+	// 	}
+	// }
+}
+
+void proximity_interactable_t::update(float deltaTime) {
+	auto v = gameObjects[this->playaIndex]->position;
+	auto y = gameObject->position;
+	auto distance = sqrtf(v.x*y.x + v.y*y.y + v.z*y.z);
+
+	if (distance < radius && !hasTriggered) {
+		hasTriggered = true;
+		// fire all triggers
+		auto componentList = gameObject->components;
+		while (componentList->componentType != ct_eol) {
+			auto componentType = componentList->componentType;
+			componentList++;
+			if (componentType == ct_game_object_activeinactive) {
+				auto gameObjectActiveinactive = componentList->gameObjectActiveinactives;
+				do
+				{
+					(*gameObjectActiveinactive)->interact();
+				} while (*++gameObjectActiveinactive);
+			}
+			componentList++;
+		}
+	} else if (distance > radius && hasTriggered) {
+		if (multipleShot) {
+			hasTriggered = false;
+		}
+	}
+}
+
+void game_object_activeinactive_t::interact() {
+	if (gameObjectToToggle != SIZE_MAX) {
+		gameObjects[gameObjectToToggle]->setActive(setTo);
+	}
+}
+
+void timed_activeinactive_t::update(float deltaTime) {
+	if (delay > 0) {
+		delay -= deltaTime;
+		if (delay <= 0) {
+			if (gameObjectToToggle != SIZE_MAX) {
+				gameObjects[gameObjectToToggle]->setActive(setTo);
+			}
+		}
+	}
+}
+
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -2377,10 +2197,21 @@ int main(int argc, const char** argv) {
     #endif
 
     InitializeHierarchy(gameObjects);
+	InitializeComponents(gameObjects);
+
+	// propagate active state
+	for (size_t i = 0; i < gameObjects.size(); ++i) {
+		auto gameObject = gameObjects[i];
+		gameObject->computeActiveState();
+		if (gameObject->parent) {
+			break;
+		}
+	}
+		
     unsigned currentStamp = 0;
 
-    Camera cam;
-    cam.go = gameObjects[3325];
+    // Camera cam;
+    // cam.go = gameObjects[3325];
     // cam.go = new game_object_t();
     // cam.go->ltw = r_matrix_t {
     //     -0.198809, 0.000000, 0.980038, 0.000000,
@@ -2407,9 +2238,9 @@ int main(int argc, const char** argv) {
     const float moveSpeed = 2.f;
     const float rotateSpeed = 45.f / 127;
 
-    cam.setFOV(70.0f, 4.0f / 3.0f);
-    cam.nearPlane = 1.f;
-    cam.farPlane = 1000.0f;
+    // cam.setFOV(70.0f, 4.0f / 3.0f);
+    // cam.nearPlane = 1.f;
+    // cam.farPlane = 1000.0f;
 
 	#if defined(DC_SH4)
 	OCR_SPACE = (uint8_t*)0x92000000;
@@ -2514,15 +2345,50 @@ int main(int argc, const char** argv) {
                 mat_apply(&rotation_matrix_yaw);
                 mat_apply(&rotation_matrix_pitch);
                 
-                mat_store((matrix_t*)&cam.go->ltw);
+                // mat_store((matrix_t*)&cam.go->ltw);
             }
         }
         
+		// component update
         for(auto& animator: animators) {
-            animator->update(deltaTime);
+			if (gameObjects[animator->gameObjectIndex]->isActive()) {
+				animator->update(deltaTime);
+			}
         }
 
+		for (auto camera = cameras; *camera; camera++) {
+			if ((*camera)->gameObject->isActive()) {
+				// (*camera)->update(deltaTime);
+			}
+		}
+
+		// script update
+		for (auto proximity_interactable = proximity_interactables; *proximity_interactable; proximity_interactable++) {
+			if ((*proximity_interactable)->gameObject->isActive()) {
+				(*proximity_interactable)->update(deltaTime);
+			}
+		}
+		for (auto game_object_activeinactive = game_object_activeinactives; *game_object_activeinactive; game_object_activeinactive++) {
+			if ((*game_object_activeinactive)->gameObject->isActive()) {
+				//(*game_object_activeinactive)->update(deltaTime);
+			}
+		}
+		for (auto timed_activeinactive = timed_activeinactives; *timed_activeinactive; timed_activeinactive++) {
+			if ((*timed_activeinactive)->gameObject->isActive()) {
+				(*timed_activeinactive)->update(deltaTime);
+			}
+		}
+		for (auto fadein = fadeins; *fadein; fadein++) {
+			if ((*fadein)->gameObject->isActive()) {
+				//(*fadein)->update(deltaTime);
+			}
+		}
+
         for (auto go: gameObjects) {
+			if (!go->isActive()) {
+				continue;
+			}
+
             r_matrix_t pos_mtx = {
                 1, 0, 0, 0,
                 0, 1, 0, 0,
@@ -2575,22 +2441,22 @@ int main(int argc, const char** argv) {
             mat_apply((matrix_t*)&rot_mtx_z);
             mat_apply((matrix_t*)&scale_mtx);
             mat_store((matrix_t*)&go->ltw);
-
-            // printf("BEFORE:\n");
-            // printf("mtx: %f %f %f %f\n", go->ltw.right.x, go->ltw.right.y, go->ltw.right.z, go->ltw.right_w);
-            // printf("mtx: %f %f %f %f\n", go->ltw.up.x, go->ltw.up.y, go->ltw.up.z, go->ltw.up_w);
-            // printf("mtx: %f %f %f %f\n", go->ltw.at.x, go->ltw.at.y, go->ltw.at.z, go->ltw.at_w);
-            // printf("mtx: %f %f %f %f\n", go->ltw.pos.x, go->ltw.pos.y, go->ltw.pos.z, go->ltw.pos_w);
-            // printf("AFTER:\n");
-            // printf("mtx: %f %f %f %f\n", go->ltw.right.x, go->ltw.right.y, go->ltw.right.z, go->ltw.right_w);
-            // printf("mtx: %f %f %f %f\n", go->ltw.up.x, go->ltw.up.y, go->ltw.up.z, go->ltw.up_w);
-            // printf("mtx: %f %f %f %f\n", go->ltw.at.x, go->ltw.at.y, go->ltw.at.z, go->ltw.at_w);
-            // printf("mtx: %f %f %f %f\n", go->ltw.pos.x, go->ltw.pos.y, go->ltw.pos.z, go->ltw.pos_w);
-
-            // printf("\n");
         }
-        
-        cam.beforeRender();
+
+		camera_t* currentCamera = nullptr;
+		for (auto camera = cameras; *camera; camera++) {
+			if ((*camera)->gameObject->isActive()) {
+				currentCamera = *camera;
+				break;
+			}
+		}
+		if (!currentCamera) {
+			std::cout << "No active camera found" << std::endl;
+			continue;
+		}
+		
+        // find current camera
+        currentCamera->beforeRender(4.0f / 3.0f);
 
         // render frame
         pvr_set_zclip(0.0f);
@@ -2603,8 +2469,8 @@ int main(int argc, const char** argv) {
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_OP_POLY);
         for (auto& go: gameObjects) {
-            if (go->active && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
-                renderMesh<PVR_LIST_OP_POLY>(&cam, go);
+            if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
+                renderMesh<PVR_LIST_OP_POLY>(currentCamera, go);
             }
         }
         pvr_list_finish();
@@ -2612,8 +2478,8 @@ int main(int argc, const char** argv) {
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_TR_POLY);
         for (auto& go: gameObjects) {
-            if (go->active && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha != 1) {
-                renderMesh<PVR_LIST_TR_POLY>(&cam, go);
+            if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha != 1) {
+                renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
             }
         }
         if (vertexOverflown()) {
