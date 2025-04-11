@@ -24,6 +24,8 @@
 
 #define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
 
+static const float deg2rad = M_PI/180.0f;
+
 #define MAX_LIGHTS 8
 
 #if defined(DC_SH4)
@@ -2170,6 +2172,55 @@ void timed_activeinactive_t::update(float deltaTime) {
 	}
 }
 
+void player_movement_t::update(float deltaTime) {
+	if (!canMove) {
+		return;
+	}
+
+	auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+	if (!contMaple) {
+		return;
+	}
+	auto state = (cont_state_t *)maple_dev_status(contMaple);
+	if (!state) {
+		return;
+	}
+	float movement = 0;
+	if (state->a) {
+		movement = 1;
+	}
+	if (state->y) {
+		movement = -0.7f;
+	}
+
+	movement *= speed * deltaTime;
+
+	
+	float movementX = sin(gameObject->rotation.y * deg2rad) * movement;
+	float movementZ = cos(gameObject->rotation.y * deg2rad) * movement;
+	gameObject->position.x += movementX;
+	gameObject->position.z += movementZ;
+}
+
+void mouse_look_t::update(float deltaTime) {
+	auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+	if (!contMaple) {
+		return;
+	}
+	auto state = (cont_state_t *)maple_dev_status(contMaple);
+	if (!state) {
+		return;
+	}
+
+	if (lookEnabled) {
+		if (rotateEnabled) {
+			gameObjects[playerBodyIndex]->rotation.y += (float)state->joyx * rotateSpeed * deltaTime;
+			gameObject->rotation.x += (float)state->joyy * rotateSpeed * deltaTime;
+			gameObject->rotation.x = std::clamp(gameObject->rotation.x, -89.0f, 89.0f);
+		}
+	}
+}
+
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -2210,38 +2261,6 @@ int main(int argc, const char** argv) {
 		
     unsigned currentStamp = 0;
 
-    // Camera cam;
-    // cam.go = gameObjects[3325];
-    // cam.go = new game_object_t();
-    // cam.go->ltw = r_matrix_t {
-    //     -0.198809, 0.000000, 0.980038, 0.000000,
-    //     0, 1, 0, 0,
-    //     -0.980038, 0, -0.198809, 0,
-    //     24571, 4.27, 8699, 1.000000
-    // };
-    // cam.go->ltw = r_matrix_t {
-    //     -0.198809, 0.000000, 0.980038, 0.000000,
-    //     0, 1, 0, 0,
-    //     -0.980038, 0, -0.198809, 0,
-    //     16317, 2, 8539, 1.000000
-    // };
-    // cam.go->ltw = r_matrix_t {
-    //     -0.198809, 0.000000, 0.980038, 0.000000,
-    //     0, 1, 0, 0,
-    //     -0.980038, 0, -0.198809, 0,
-    //     0, 0, 0, 1.000000
-    // };
-
-    float camX = 155.f, camY = 4.f, camZ = 235.f;
-    float yaw = 100.0f, pitch = 0.0f;
-
-    const float moveSpeed = 2.f;
-    const float rotateSpeed = 45.f / 127;
-
-    // cam.setFOV(70.0f, 4.0f / 3.0f);
-    // cam.nearPlane = 1.f;
-    // cam.farPlane = 1000.0f;
-
 	#if defined(DC_SH4)
 	OCR_SPACE = (uint8_t*)0x92000000;
 
@@ -2276,7 +2295,7 @@ int main(int argc, const char** argv) {
         
         auto deltaTime = std::chrono::duration_cast<std::chrono::duration<float>>(tp_this_frame - tp_last_frame).count();
         tp_last_frame = tp_this_frame;
-        // printf("Delta time: %f\n", deltaTime);
+
         // get input
         auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
         if (contMaple) {
@@ -2287,69 +2306,13 @@ int main(int argc, const char** argv) {
                     break;
                 }
 
-
-                yaw += state->joyx * rotateSpeed * deltaTime; // Convert degrees to radians
-                pitch += state->joyy * rotateSpeed * deltaTime; // Convert degrees to radians
-
-                if (pitch > 89.0f)  pitch = 89.0f;
-                if (pitch < -89.0f) pitch = -89.0f;
-
-                float radYaw = -yaw * ((float)M_PI / 180.0f);
-                float radPitch = pitch * ((float)M_PI / 180.0f);
-                float forwardX = cos(radPitch) * sin(radYaw);
-                float forwardY = sin(radPitch);
-                float forwardZ = -cos(radPitch) * cos(radYaw);
-                float rightX = cos(radYaw);
-                float rightZ = sin(radYaw);
-                
-                if (state->x) {
-                    camX -= rightX * moveSpeed;
-                    camZ -= rightZ * moveSpeed;
-                } else if (state->b) {
-                    camX += rightX * moveSpeed;
-                    camZ += rightZ * moveSpeed;
-                }
-
-                if (state->a) {
-                    camX += forwardX * moveSpeed;
-                    camY += forwardY * moveSpeed;
-                    camZ += forwardZ * moveSpeed;
-                } else if (state->y) {
-                    camX -= forwardX * moveSpeed;
-                    camY -= forwardY * moveSpeed;
-                    camZ -= forwardZ * moveSpeed;
-                }
-
-                matrix_t translation_matrix = {
-                    { 1, 0, 0, 0 },
-                    { 0, 1, 0, 0 },
-                    { 0, 0, 1, 0 },
-                    { camX, camY, camZ, 1 },
-                };
-
-
-				matrix_t rotation_matrix_yaw = {
-					{ cosf(radYaw), 0, sinf(radYaw), 0 },
-					{ 0, 1, 0, 0 },
-					{ -sinf(radYaw), 0, cosf(radYaw), 0 },
-					{ 0, 0, 0, 1 },
-				};
-
-                matrix_t rotation_matrix_pitch = {
-                    { 1, 0, 0, 0 },
-                    { 0, cosf(radPitch), sinf(radPitch), 0 },
-                    { 0, -sinf(radPitch), cosf(radPitch), 0 },
-                    { 0, 0, 0, 1 },
-                };
-				mat_load(&translation_matrix);
-                mat_apply(&rotation_matrix_yaw);
-                mat_apply(&rotation_matrix_pitch);
-                
-                // mat_store((matrix_t*)&cam.go->ltw);
+				if (state->ltrig > 64) {
+					deltaTime *= state->ltrig / 25.f;
+				}
             }
         }
         
-		// component update
+		// components
         for(auto& animator: animators) {
 			if (gameObjects[animator->gameObjectIndex]->isActive()) {
 				animator->update(deltaTime);
@@ -2362,7 +2325,7 @@ int main(int argc, const char** argv) {
 			}
 		}
 
-		// script update
+		// scripts
 		for (auto proximity_interactable = proximity_interactables; *proximity_interactable; proximity_interactable++) {
 			if ((*proximity_interactable)->gameObject->isActive()) {
 				(*proximity_interactable)->update(deltaTime);
@@ -2383,6 +2346,16 @@ int main(int argc, const char** argv) {
 				//(*fadein)->update(deltaTime);
 			}
 		}
+		for (auto player_movement = player_movements; *player_movement; player_movement++) {
+			if ((*player_movement)->gameObject->isActive()) {
+				(*player_movement)->update(deltaTime);
+			}
+		}
+		for (auto mouse_look = mouse_looks; *mouse_look; mouse_look++) {
+			if ((*mouse_look)->gameObject->isActive()) {
+				(*mouse_look)->update(deltaTime);
+			}
+		}
 
         for (auto go: gameObjects) {
 			if (!go->isActive()) {
@@ -2396,7 +2369,6 @@ int main(int argc, const char** argv) {
                 go->position.x, go->position.y, go->position.z, 1
             };
 
-            static const float deg2rad = M_PI/180.0f;
             r_matrix_t rot_mtx_x = {
                 1, 0, 0, 0,
                 0, cosf(go->rotation.x*deg2rad), sinf(go->rotation.x*deg2rad), 0,
