@@ -12,8 +12,12 @@ all: $(TARGET_SIM) $(TARGET) repacker.elf
 DATA_DIR=repack-data/tlj
 
 # include common.mk
+include reactphysics3d.mk
+OBJS = \
+	../main.o ../vendor/gldc/alloc.o ../hierarchy.o ../components.o ../animations.o ../cameras.o ../scripts.o \
+	\
+	$(RP3D_OBJECTS)
 
-OBJS = ../main.o ../vendor/gldc/alloc.o ../hierarchy.o ../components.o ../animations.o ../cameras.o ../scripts.o
 DEPS_OBJS=$(OBJS:.o=.d)
 
 OBJS_SIM=$(OBJS:.o=.sim.o) \
@@ -63,21 +67,19 @@ $(warning "KOS_BASE is not set. Only prebuilt targets will work.")
 endif
 
 %.o: %.cpp
-	kos-c++ $(CXXFLAGS) $(CPPFLAGS) -DDC_SH4=1 -c $< -o $@
+	kos-c++ $(CXXFLAGS) $(CPPFLAGS) $(RP3D_INCLUDE_DIRS) -DDC_SH4=1 -c $< -o $@
 
 $(TARGET): $(OBJS)
 	kos-c++ -o $(TARGET) $(OBJS) -Wl,--gc-sections -Wl,--as-needed -Wl,-Map,output.map
 	@echo && echo && echo "*** Build Completed Successfully ($(TARGET)) ***" && echo && echo
 
 %.sim.o: %.c
-	$(CC) -c -O0 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_SIM $<
+	$(CC) -c -O0 -g -fno-pic -no-pie -o $@ $(CFLAGS) -I../vendor/koshle -I../vendor/emu -I../ $(RP3D_INCLUDE_DIRS) -DDC_SIM $<
 %.sim.o: %.cpp
-	$(CXX) -c -O0 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_SIM $<
+	$(CXX) -c -O0 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ $(RP3D_INCLUDE_DIRS) -DDC_SIM $<
 %.sim.o3: %.cpp
-	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ -DDC_SIM $<
+	$(CXX) -c -O3 -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -I../vendor/koshle -I../vendor/emu -I../ $(RP3D_INCLUDE_DIRS) -DDC_SIM $<
 
-clean:
-	-rm -f $(OBJS_SIM) $(TARGET) $(DEPS_SIM)
 
 pvrtex:
 	$(MAKE) -C ../vendor/pvrtex
@@ -114,7 +116,17 @@ repacker.elf: $(OBJS_REPACKER) | pvrtex
 $(PROJECT_NAME).cdi: $(TARGET)
 	mkdcdisc -e $(TARGET) -o $(PROJECT_NAME).cdi -d $(DATA_DIR)/ $(MKDCDISC_PAD_OPTION) -n $(PROJECT_NAME) -a $(TEAM_NAME) -s $(DISC_SERIAL) -r $(RELEASE_DATE)
 
-.PHONY: pvrtex
+sim: $(TARGET_SIM)
+	@echo && echo && echo "*** Build Completed Successfully ($(TARGET_SIM)) ***" && echo && echo
+
+cdi: $(PROJECT_NAME).cdi
+	@echo && echo && echo "*** Build Completed Successfully ($(PROJECT_NAME).cdi) ***" && echo && echo
+
+.PHONY: pvrtex cdi sim
+
+
+clean:
+	-rm -f $(OBJS) $(DEPS_OBJS) $(OBJS_SIM) $(DEPS_SIM) $(OBJS_REPACKER) $(DEPS_REPACKER) $(TARGET)
 
 -include $(DEPS_OBJS)
 -include $(DEPS_SIM)
