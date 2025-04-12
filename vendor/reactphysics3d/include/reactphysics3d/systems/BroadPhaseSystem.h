@@ -129,7 +129,7 @@ class BroadPhaseSystem {
         /// Set with the broad-phase IDs of all collision shapes that have moved (or have been
         /// created) during the last simulation step. Those are the shapes that need to be tested
         /// for overlapping in the next simulation step.
-        Set<int> mMovedShapes;
+        Set<int32> mMovedShapes;
 
         /// Reference to the collision detection object
         CollisionDetectionSystem& mCollisionDetection;

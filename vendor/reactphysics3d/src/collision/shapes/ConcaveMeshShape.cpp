@@ -144,7 +144,7 @@ void ConcaveMeshShape::computeOverlappingTriangles(const AABB& localAABB, Array<
     aabb.applyScale(Vector3(decimal(1.0) / mScale.x, decimal(1.0) / mScale.y, decimal(1.0) / mScale.z));
 
     // Compute the nodes of the internal AABB tree that are overlapping with the AABB
-    Array<int> overlappingNodes(allocator, 64);
+    Array<int32> overlappingNodes(allocator, 64);
     mTriangleMesh->reportAllShapesOverlappingWithAABB(aabb, overlappingNodes);
 
     const uint32 nbOverlappingNodes = static_cast<uint32>(overlappingNodes.size());
@@ -218,7 +218,7 @@ decimal ConcaveMeshRaycastCallback::raycastBroadPhaseShape(int32 nodeId, const R
 // Raycast all collision shapes that have been collected
 void ConcaveMeshRaycastCallback::raycastTriangles() {
 
-    Array<int>::Iterator it;
+    Array<int32>::Iterator it;
     decimal smallestHitFraction = mRay.maxFraction;
 
     for (it = mHitAABBNodes.begin(); it != mHitAABBNodes.end(); ++it) {

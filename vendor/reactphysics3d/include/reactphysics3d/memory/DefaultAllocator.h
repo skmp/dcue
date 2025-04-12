@@ -64,12 +64,14 @@ class DefaultAllocator : public MemoryAllocator {
 
                 // Visual Studio doesn't not support standard std:aligned_alloc() method from C++ 17
                 return _aligned_malloc(size, GLOBAL_ALIGNMENT);
-#else
+#elif !defined(DC_SH4)
 
                 // Return 16-bytes aligned memory
                 void* address = nullptr;
                 posix_memalign(&address, GLOBAL_ALIGNMENT, size);
                 return address;
+#else
+            return malloc(size);
 #endif
         }
 

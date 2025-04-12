@@ -245,7 +245,7 @@ class DynamicAABBTree {
                                                   size_t endIndex, Array<Pair<int32, int32>>& outOverlappingNodes) const;
 
         /// Report all shapes overlapping with the AABB given in parameter.
-        void reportAllShapesOverlappingWithAABB(const AABB& aabb, Array<int>& overlappingNodes) const;
+        void reportAllShapesOverlappingWithAABB(const AABB& aabb, Array<int32>& overlappingNodes) const;
 
         /// Ray casting method
         void raycast(const Ray& ray, DynamicAABBTreeRaycastCallback& callback) const;

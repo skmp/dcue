@@ -5,6 +5,7 @@
 #include "fadein.h"
 #include "player_movement.h"
 #include "mouse_look.h"
+#include "interactable.h"
 
 // scripts
 extern proximity_interactable_t* proximity_interactables[];

@@ -36,6 +36,7 @@ void Transform::setFromOpenGL(decimal* openglMatrix) {
                      openglMatrix[1], openglMatrix[5], openglMatrix[9],
                      openglMatrix[2], openglMatrix[6], openglMatrix[10]);
     mOrientation = Quaternion(matrix);
+    mOrientation.normalize();
     mPosition.setAllValues(openglMatrix[12], openglMatrix[13], openglMatrix[14]);
 }
 

@@ -1,11 +1,13 @@
 #pragma once
 #include <cstddef>
+#include "components.h"
 
 namespace native {
     struct game_object_t;
 }
 
 struct mouse_look_t {
+    static constexpr component_type_t componentType = ct_mouse_look;
     native::game_object_t* gameObject;
 
     size_t playerBodyIndex;

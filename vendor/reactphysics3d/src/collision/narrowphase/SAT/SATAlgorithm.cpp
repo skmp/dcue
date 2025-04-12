@@ -692,7 +692,7 @@ bool SATAlgorithm::testCollisionConvexPolyhedronVsConvexPolyhedron(NarrowPhaseIn
         isMinPenetrationFaceNormal = false;
 
         // Test all the face normals of the polyhedron 1 for separating axis
-        uint32 faceIndex1;
+        uint faceIndex1;
         decimal penetrationDepth1 = testFacesDirectionPolyhedronVsPolyhedron(polyhedron1, polyhedron2, polyhedron1ToPolyhedron2, faceIndex1);
         if (penetrationDepth1 <= decimal(0.0)) {
 
@@ -705,7 +705,7 @@ bool SATAlgorithm::testCollisionConvexPolyhedronVsConvexPolyhedron(NarrowPhaseIn
         }
 
         // Test all the face normals of the polyhedron 2 for separating axis
-        uint32 faceIndex2;
+        uint faceIndex2;
         decimal penetrationDepth2 = testFacesDirectionPolyhedronVsPolyhedron(polyhedron2, polyhedron1, polyhedron2ToPolyhedron1, faceIndex2);
         if (penetrationDepth2 <= decimal(0.0)) {
 

@@ -2,6 +2,9 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+
+#include "components.h"
+
 namespace native {
     struct game_object_t;
 }
@@ -63,6 +66,7 @@ struct bound_animation_t {
 };
 
 struct animator_t {
+    static constexpr component_type_t componentType = ct_animator;
     native::game_object_t* gameObject;
 
     bound_animation_t* bound_animations;

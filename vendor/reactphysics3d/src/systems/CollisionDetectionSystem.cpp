@@ -558,7 +558,7 @@ void CollisionDetectionSystem::computeConvexVsConcaveMiddlePhase(OverlappingPair
     // Compute the concave shape triangles that are overlapping with the convex mesh AABB
     Array<Vector3> triangleVertices(allocator, 64);
     Array<Vector3> triangleVerticesNormals(allocator, 64);
-    Array<uint> shapeIds(allocator, 64);
+    Array<uint32> shapeIds(allocator, 64);
     concaveShape->computeOverlappingTriangles(aabb, triangleVertices, triangleVerticesNormals, shapeIds, allocator);
 
     assert(triangleVertices.size() == triangleVerticesNormals.size());

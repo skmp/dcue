@@ -42,7 +42,7 @@ HeapAllocator::HeapAllocator(MemoryAllocator& baseAllocator, size_t initAllocate
         mNbTimesAllocateMethodCalled = 0;
 #endif
 
-    reserve(initAllocatedMemory == 0 ? INIT_ALLOCATED_SIZE : initAllocatedMemory);
+    // reserve(initAllocatedMemory == 0 ? INIT_ALLOCATED_SIZE : initAllocatedMemory);
 }
 
 // Destructor
@@ -120,6 +120,7 @@ void HeapAllocator::splitMemoryUnit(MemoryUnitHeader* unit, size_t size) {
 // Allocate memory of a given size (in bytes) and return a pointer to the
 // allocated memory.
 void* HeapAllocator::allocate(size_t size) {
+    return malloc(size);
 
     // Lock the method with a mutex
     std::lock_guard<std::mutex> lock(mMutex);
@@ -213,7 +214,8 @@ void* HeapAllocator::computeAlignedAddress(void* unalignedAddress) {
 
 // Release previously allocated memory.
 void HeapAllocator::release(void* pointer, size_t size) {
-
+    free(pointer);
+    return;
     // Lock the method with a mutex
     std::lock_guard<std::mutex> lock(mMutex);
 

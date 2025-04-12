@@ -15,12 +15,16 @@
 #include <cassert>
 #include <cstring>
 #include <chrono>
+#include <map>
 
 #include "animations.h"
 #include "hierarchy.h"
 #include "components.h"
 #include "scripts.h"
 #include "cameras.h"
+#include "physics.h"
+
+// #define DEBUG_PHYSICS
 
 #define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
 
@@ -2135,18 +2139,12 @@ void proximity_interactable_t::update(float deltaTime) {
 	if (distance < radius && !hasTriggered) {
 		hasTriggered = true;
 		// fire all triggers
-		auto componentList = gameObject->components;
-		while (componentList->componentType != ct_eol) {
-			auto componentType = componentList->componentType;
-			componentList++;
-			if (componentType == ct_game_object_activeinactive) {
-				auto gameObjectActiveinactive = componentList->gameObjectActiveinactives;
-				do
-				{
-					(*gameObjectActiveinactive)->interact();
-				} while (*++gameObjectActiveinactive);
-			}
-			componentList++;
+		auto component = gameObject->getComponents<game_object_activeinactive_t>();
+
+		if (component) {
+			do {
+				(*component)->interact();
+			} while(*++component);
 		}
 	} else if (distance > radius && hasTriggered) {
 		if (multipleShot) {
@@ -2202,6 +2200,34 @@ void player_movement_t::update(float deltaTime) {
 	gameObject->position.z += movementZ;
 }
 
+class RaycastDumper: public reactphysics3d::RaycastCallback {
+	box_collider_t* collider = nullptr;
+public:
+	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
+		collider = (box_collider_t*)raycastInfo.collider->getUserData();
+		return raycastInfo.hitFraction;
+	}
+
+	void showMessage() {
+		if (collider) {
+			std::cout << "Hit collider: " << collider << " gameObject " << collider->gameObject << std::endl;
+
+			if (auto component = collider->gameObject->getComponents<interactable_t>()) {
+				do {
+					std::cout << (*component)->lookAtMessage << std::endl;
+					if ((*component)->messages) {
+						auto message = (*component)->messages;
+						
+						do {
+							std::cout << *message << std::endl;
+						} while (*++message);
+					}
+				} while (*++component);
+			}
+		}
+	}
+};
+
 void mouse_look_t::update(float deltaTime) {
 	auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
 	if (!contMaple) {
@@ -2219,7 +2245,177 @@ void mouse_look_t::update(float deltaTime) {
 			gameObject->rotation.x = std::clamp(gameObject->rotation.x, -89.0f, 89.0f);
 		}
 	}
+
+	reactphysics3d::Vector3 cameraPos = {gameObject->ltw.pos.x, gameObject->ltw.pos.y, gameObject->ltw.pos.z};
+	reactphysics3d::Vector3 cameraAt = {gameObject->ltw.at.x, gameObject->ltw.at.y, gameObject->ltw.at.z};
+	reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*100);
+
+	RaycastDumper dumper;
+
+	// physics is one step behind here
+	physicsWorld->raycast(ray, &dumper);
+
+	dumper.showMessage();
 }
+
+V3d ComputeAxisAlignedScale(const r_matrix_t* mtx) {
+    V3d scale;
+	scale.x = sqrt(mtx->right.x * mtx->right.x + mtx->right.y * mtx->right.y + mtx->right.z * mtx->right.z);
+	scale.y = sqrt(mtx->up.x    * mtx->up.x    + mtx->up.y    * mtx->up.y    + mtx->up.z    * mtx->up.z);
+	scale.z = sqrt(mtx->at.x    * mtx->at.x    + mtx->at.y    * mtx->at.y    + mtx->at.z    * mtx->at.z);
+    return scale;
+}
+
+void box_collider_t::update(float deltaTime) {
+	if (!rigidBody) {
+		reactphysics3d::Transform t;
+		rigidBody = physicsWorld->createRigidBody(t);
+		rigidBody->setUserData(this);
+		rigidBody->setType(reactphysics3d::BodyType::STATIC);
+		#if defined(DEBUG_PHYSICS)
+		rigidBody->setIsDebugEnabled(true);
+		#endif
+	}
+
+	reactphysics3d::Transform t;
+	t.setFromOpenGL(&gameObject->ltw.m00);
+	rigidBody->setTransform(t);
+
+	V3d scale = ComputeAxisAlignedScale(&gameObject->ltw);
+	//V3d scale = { std::abs(gameObject->scale.x), std::abs(gameObject->scale.y), std::abs(gameObject->scale.z)};
+	if (lastScale != scale || boxShape == nullptr) {
+		if (collider) {
+			rigidBody->removeCollider(collider);
+			physicsCommon.destroyBoxShape(boxShape);
+		}
+		boxShape = physicsCommon.createBoxShape(reactphysics3d::Vector3(scale.x * halfSize.x, scale.y * halfSize.y, scale.z * halfSize.z));
+		collider = rigidBody->addCollider(boxShape, reactphysics3d::Transform(reactphysics3d::Vector3(scale.x * center.x, scale.x * center.y, scale.x *center.z), reactphysics3d::Quaternion::identity()));
+		collider->setUserData(this);
+		lastScale = scale;
+	}
+}
+
+void sphere_collider_t::update(float deltaTime) {
+	if (!rigidBody) {
+		reactphysics3d::Transform t;
+		rigidBody = physicsWorld->createRigidBody(t);
+		rigidBody->setUserData(this);
+		rigidBody->setType(reactphysics3d::BodyType::STATIC);
+		#if defined(DEBUG_PHYSICS)
+		rigidBody->setIsDebugEnabled(true);
+		#endif
+	}
+
+	
+	reactphysics3d::Transform t;
+	t.setFromOpenGL(&gameObject->ltw.m00);
+	rigidBody->setTransform(t);
+
+	V3d scale3 = ComputeAxisAlignedScale(&gameObject->ltw);
+	float scale = std::max(scale3.x, std::max(scale3.y, scale3.z));
+	if (lastScale != scale3 || sphereShape == nullptr) {
+		if (collider) {
+			rigidBody->removeCollider(collider);
+			physicsCommon.destroySphereShape(sphereShape);
+		}
+		sphereShape = physicsCommon.createSphereShape(scale * radius);
+		collider = rigidBody->addCollider(sphereShape, reactphysics3d::Transform(reactphysics3d::Vector3(center.x * scale3.x, center.y* scale3.y, center.z * scale3.z), reactphysics3d::Quaternion::identity()));
+		collider->setUserData(this);
+		lastScale = scale3;
+	}
+}
+
+void capsule_collider_t::update(float deltaTime) {
+	if (!rigidBody) {
+		reactphysics3d::Transform t;
+		rigidBody = physicsWorld->createRigidBody(t);
+		rigidBody->setUserData(this);
+		rigidBody->setType(reactphysics3d::BodyType::STATIC);
+		#if defined(DEBUG_PHYSICS)
+		rigidBody->setIsDebugEnabled(true);
+		#endif
+	}
+
+	reactphysics3d::Transform t;
+	t.setFromOpenGL(&gameObject->ltw.m00);
+	rigidBody->setTransform(t);
+
+	V3d scale3 = ComputeAxisAlignedScale(&gameObject->ltw);
+	V2d scale = V2d(std::max(scale3.x, scale3.z), scale3.y);
+
+	if (lastScale != scale3 || capsuleShape == nullptr) {
+		if (collider) {
+			rigidBody->removeCollider(collider);
+			physicsCommon.destroyCapsuleShape(capsuleShape);
+		}
+		capsuleShape = physicsCommon.createCapsuleShape(scale.x * radius, scale.y * height);
+		collider = rigidBody->addCollider(capsuleShape, reactphysics3d::Transform(reactphysics3d::Vector3(center.x * scale3.x, center.y * scale3.y, center.z * scale3.z), reactphysics3d::Quaternion::identity()));
+		collider->setUserData(this);
+		lastScale = scale3;
+	}
+}
+
+std::map<std::pair<float*, uint16_t*>, reactphysics3d::TriangleMesh*> mesh_collider_triangles;
+
+void mesh_collider_t::update(float deltaTime) {
+	if (!rigidBody) {
+		reactphysics3d::Transform t;
+		rigidBody = physicsWorld->createRigidBody(t);
+		rigidBody->setUserData(this);
+		rigidBody->setType(reactphysics3d::BodyType::STATIC);
+		#if defined(DEBUG_PHYSICS)
+		rigidBody->setIsDebugEnabled(true);
+		#endif
+	}
+
+	reactphysics3d::Transform t;
+	t.setFromOpenGL(&gameObject->ltw.m00);
+	rigidBody->setTransform(t);
+
+	V3d scale = ComputeAxisAlignedScale(&gameObject->ltw);
+	
+	if (lastScale != scale || meshShape == nullptr) {
+		if (indexCount == 0 || vertexCount == 0) {
+			return;
+		}
+		if (collider) {
+			rigidBody->removeCollider(collider);
+			physicsCommon.destroyConcaveMeshShape(meshShape);
+		}
+		if (!triangleMesh) {
+			triangleMesh = mesh_collider_triangles[{vertices, indices}];
+			if (triangleMesh == nullptr) {
+				reactphysics3d::TriangleVertexArray triangleVertexArray(
+					vertexCount, vertices, sizeof(float)*3, indexCount/3, indices, sizeof(int16_t)*3,
+					reactphysics3d::TriangleVertexArray::VertexDataType::VERTEX_FLOAT_TYPE,
+					reactphysics3d::TriangleVertexArray::IndexDataType::INDEX_SHORT_TYPE
+				);
+				std::vector<reactphysics3d::Message> messages;
+				triangleMesh = physicsCommon.createTriangleMesh(triangleVertexArray, messages);
+				if (triangleMesh == nullptr) {
+					// Handle error
+					std::cerr << "Failed to create triangle mesh shape" << std::endl;
+
+					for (const auto& message : messages) {
+						std::cerr << "Message: " << message.text << std::endl;
+					}
+					assert(false && "Failed to create triangle mesh shape");
+				}
+
+				mesh_collider_triangles[{vertices, indices}] = triangleMesh;
+			}
+		}
+		meshShape = physicsCommon.createConcaveMeshShape(triangleMesh, reactphysics3d::Vector3(scale.x, scale.y, scale.z));
+		collider = rigidBody->addCollider(meshShape, reactphysics3d::Transform::identity());
+		collider->setUserData(this);
+		lastScale = scale;
+	}
+}
+
+reactphysics3d::PhysicsCommon physicsCommon;
+reactphysics3d::PhysicsWorld* physicsWorld = nullptr;
+
+
 
 int main(int argc, const char** argv) {
 
@@ -2249,15 +2445,6 @@ int main(int argc, const char** argv) {
 
     InitializeHierarchy(gameObjects);
 	InitializeComponents(gameObjects);
-
-	// propagate active state
-	for (size_t i = 0; i < gameObjects.size(); ++i) {
-		auto gameObject = gameObjects[i];
-		gameObject->computeActiveState();
-		if (gameObject->parent) {
-			break;
-		}
-	}
 		
     unsigned currentStamp = 0;
 
@@ -2288,7 +2475,16 @@ int main(int argc, const char** argv) {
 	}
 	#endif
 
-    auto tp_last_frame = std::chrono::system_clock::now();
+	physicsWorld = physicsCommon.createPhysicsWorld();
+
+	#if defined(DEBUG_PHYSICS)
+	physicsWorld->setIsDebugRenderingEnabled(true);
+	reactphysics3d::DebugRenderer& debugRenderer = physicsWorld->getDebugRenderer();
+	debugRenderer.setIsDebugItemDisplayed(reactphysics3d::DebugRenderer::DebugItem::COLLIDER_AABB, true);
+	//debugRenderer.setIsDebugItemDisplayed(reactphysics3d::DebugRenderer::DebugItem::COLLISION_SHAPE, true);
+	#endif
+
+    auto tp_last_frame = std::chrono::system_clock::now() - std::chrono::milliseconds(16);
     for(;;) {
         currentStamp++;
         auto tp_this_frame = std::chrono::system_clock::now();
@@ -2415,6 +2611,31 @@ int main(int argc, const char** argv) {
             mat_store((matrix_t*)&go->ltw);
         }
 
+		// physics (these use ltw)
+		for (auto box_collider = box_colliders; *box_collider; box_collider++) {
+			if ((*box_collider)->gameObject->isActive()) {
+				(*box_collider)->update(deltaTime);
+			}
+		}
+		for (auto sphere_collider = sphere_colliders; *sphere_collider; sphere_collider++) {
+			if ((*sphere_collider)->gameObject->isActive()) {
+				(*sphere_collider)->update(deltaTime);
+			}
+		}
+		for (auto capsule_collider = capsule_colliders; *capsule_collider; capsule_collider++) {
+			if ((*capsule_collider)->gameObject->isActive()) {
+				(*capsule_collider)->update(deltaTime);
+			}
+		}
+		for (auto mesh_collider = mesh_colliders; *mesh_collider; mesh_collider++) {
+			if ((*mesh_collider)->gameObject->isActive()) {
+				(*mesh_collider)->update(deltaTime);
+			}
+		}
+		
+		physicsWorld->update(deltaTime);
+
+		// find current camera
 		camera_t* currentCamera = nullptr;
 		for (auto camera = cameras; *camera; camera++) {
 			if ((*camera)->gameObject->isActive()) {
@@ -2422,12 +2643,12 @@ int main(int argc, const char** argv) {
 				break;
 			}
 		}
+
 		if (!currentCamera) {
 			std::cout << "No active camera found" << std::endl;
 			continue;
 		}
-		
-        // find current camera
+
         currentCamera->beforeRender(4.0f / 3.0f);
 
         // render frame
@@ -2440,6 +2661,7 @@ int main(int argc, const char** argv) {
         pvr_scene_begin();
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_OP_POLY);
+
         for (auto& go: gameObjects) {
             if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
                 renderMesh<PVR_LIST_OP_POLY>(currentCamera, go);
@@ -2450,10 +2672,127 @@ int main(int argc, const char** argv) {
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_TR_POLY);
         for (auto& go: gameObjects) {
-            if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha != 1) {
-                renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
+			if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha != 1) {
+				renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
             }
         }
+
+		#if defined(DEBUG_PHYSICS)
+		pvr_poly_hdr_t hdr;
+		pvr_poly_cxt_col_fast(
+			&hdr,
+			PVR_LIST_TR_POLY,
+			PVR_CLRFMT_4FLOATS,
+			PVR_BLEND_SRCALPHA,
+			PVR_BLEND_INVSRCALPHA,
+			PVR_DEPTHCMP_GREATER,
+			PVR_DEPTHWRITE_ENABLE,
+			PVR_CULLING_NONE,
+			PVR_FOG_DISABLE
+		);
+		pvr_prim(&hdr, sizeof(hdr));
+
+		mat_load(&currentCamera->devViewProjScreen);
+		for (int lineNum = 0; lineNum < debugRenderer.getNbLines(); lineNum++) {
+			auto lines = debugRenderer.getLinesArray();
+
+			auto line = lines[lineNum];
+
+			float ignored;
+			pvr_vertex32_ut vtx[4];
+			vtx[0].flags = PVR_CMD_VERTEX;
+			mat_trans_nodiv_nomod(line.point1.x, line.point1.y, line.point1.z, vtx[0].x, vtx[0].y, ignored, vtx[0].z);
+			vtx[0].x /= vtx[0].z;
+			vtx[0].y /= vtx[0].z;
+			vtx[0].z = 1/vtx[0].z;
+			vtx[0].a = 0.5f;
+			vtx[0].r = 1;
+			vtx[0].g = 1;
+			vtx[0].b = 1;
+
+			vtx[1].flags = PVR_CMD_VERTEX;
+			mat_trans_nodiv_nomod(line.point2.x, line.point2.y, line.point2.z, vtx[1].x, vtx[1].y, ignored, vtx[1].z);
+			vtx[1].x /= vtx[1].z;
+			vtx[1].y /= vtx[1].z;
+			vtx[1].z = 1/vtx[1].z;
+			vtx[1].a = 0.5f;
+			vtx[1].r = 1;
+			vtx[1].g = 1;
+			vtx[1].b = 1;
+
+			// Extend to generate a triangle strip
+			vtx[2].flags = PVR_CMD_VERTEX;
+			vtx[2].x = vtx[0].x + 3.f; // Offset for quad
+			vtx[2].y = vtx[0].y + 3.f;
+			vtx[2].z = vtx[0].z;
+			vtx[2].a = 0.5f;
+			vtx[2].r = 1;
+			vtx[2].g = 1;
+			vtx[2].b = 1;
+
+			vtx[3].flags = PVR_CMD_VERTEX_EOL; // End of triangle strip
+			vtx[3].x = vtx[1].x + 3.f; // Offset for quad
+			vtx[3].y = vtx[1].y + 3.f;
+			vtx[3].z = vtx[1].z;
+			vtx[3].a = 0.5f;
+			vtx[3].r = 1;
+			vtx[3].g = 1;
+			vtx[3].b = 1;
+
+			if (vtx[0].z < 0 || vtx[1].z < 0) {
+				continue;
+			}
+			pvr_prim(vtx, sizeof(pvr_vertex32_ut));
+			pvr_prim(vtx + 1, sizeof(pvr_vertex32_ut));
+			pvr_prim(vtx + 2, sizeof(pvr_vertex32_ut));
+			pvr_prim(vtx + 3, sizeof(pvr_vertex32_ut));
+		}
+
+		for (int triangleNum = 0; triangleNum < debugRenderer.getNbTriangles(); triangleNum++) {
+			auto triangles = debugRenderer.getTrianglesArray();
+			auto triangle = triangles[triangleNum];
+			float ignored;
+			pvr_vertex32_ut vtx[3];
+
+			mat_trans_nodiv_nomod(triangle.point1.x, triangle.point1.y, triangle.point1.z, vtx[0].x, vtx[0].y, ignored, vtx[0].z);
+			vtx[0].x /= vtx[0].z;
+			vtx[0].y /= vtx[0].z;
+			vtx[0].z = 1/vtx[0].z + 1;
+			vtx[0].a = 0.1f;
+			vtx[0].r = 1;
+			vtx[0].g = 1;
+			vtx[0].b = 1;
+
+			mat_trans_nodiv_nomod(triangle.point2.x, triangle.point2.y, triangle.point2.z, vtx[1].x, vtx[1].y, ignored, vtx[1].z);
+			vtx[1].x /= vtx[1].z;
+			vtx[1].y /= vtx[1].z;
+			vtx[1].z = 1/vtx[1].z + 1;
+			vtx[1].a = 0.1f;
+			vtx[1].r = 1;
+			vtx[1].g = 1;
+			vtx[1].b = 1;
+
+			mat_trans_nodiv_nomod(triangle.point3.x, triangle.point3.y, triangle.point3.z, vtx[2].x, vtx[2].y, ignored, vtx[2].z);
+			vtx[2].x /= vtx[2].z;
+			vtx[2].y /= vtx[2].z;
+			vtx[2].z = 1/vtx[2].z + 1;
+			vtx[2].a = 0.1f;
+			vtx[2].r = 1;
+			vtx[2].g = 1;
+			vtx[2].b = 1;
+			vtx[0].flags = PVR_CMD_VERTEX;
+			vtx[1].flags = PVR_CMD_VERTEX;
+			vtx[2].flags = PVR_CMD_VERTEX_EOL;
+
+			if (vtx[0].z < 0 || vtx[1].z < 0 || vtx[2].z < 0) {
+				continue;
+			}
+
+			pvr_prim(vtx, sizeof(pvr_vertex32_ut));
+			pvr_prim(vtx + 1, sizeof(pvr_vertex32_ut));
+			pvr_prim(vtx + 2, sizeof(pvr_vertex32_ut));
+		}
+		#endif
         if (vertexOverflown()) {
 			freeVertexTarget += freeVertexTarget_Step_Up;
 		} else {

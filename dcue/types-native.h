@@ -7,7 +7,8 @@
 
 #include "dc/pvr.h"
 
-struct component_t;
+#include "../components.h"
+
 namespace native {
     struct texture_t {
         uint32_t flags;
@@ -119,6 +120,20 @@ namespace native {
 
         void setActive(bool active);
         void computeActiveState();
+
+        template<typename T>
+        T** getComponents() {
+            auto componentList = components;
+            while (componentList->componentType != ct_eol) {
+                auto componentType = componentList->componentType;
+                componentList++;
+                if (componentType == T::componentType) {
+                    return (T**)componentList->data;
+                }
+                componentList++;
+            }
+            return nullptr;
+        }
     };
 
     struct MeshInfo {

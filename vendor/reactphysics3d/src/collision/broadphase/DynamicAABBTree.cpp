@@ -131,7 +131,7 @@ int32 DynamicAABBTree::allocateNode() {
 }
 
 // Release a node
-void DynamicAABBTree::releaseNode(int nodeID) {
+void DynamicAABBTree::releaseNode(int32 nodeID) {
 
     assert(mNbNodes > 0);
     assert(nodeID >= 0 && nodeID < mNbAllocatedNodes);
@@ -216,7 +216,7 @@ bool DynamicAABBTree::updateObject(int32 nodeID, const AABB& newAABB, bool force
 // Insert a leaf node in the tree. The process of inserting a new leaf node
 // in the dynamic tree is described in the book "Introduction to Game Physics
 // with Box2D" by Ian Parberry.
-void DynamicAABBTree::insertLeafNode(int nodeID) {
+void DynamicAABBTree::insertLeafNode(int32 nodeID) {
 
     // If the tree is empty
     if (mRootNodeID == TreeNode::NULL_TREE_NODE) {
@@ -346,7 +346,7 @@ void DynamicAABBTree::insertLeafNode(int nodeID) {
 }
 
 // Remove a leaf node from the tree
-void DynamicAABBTree::removeLeafNode(int nodeID) {
+void DynamicAABBTree::removeLeafNode(int32 nodeID) {
 
     assert(nodeID >= 0 && nodeID < mNbAllocatedNodes);
     assert(mNodes[nodeID].isLeaf());

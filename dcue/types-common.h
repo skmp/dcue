@@ -3,13 +3,32 @@
 #include <cmath>
 struct V2d {
     float x, y;
+	bool operator==(const V2d &other) const {
+		return x == other.x && y == other.y;
+	}
+	bool operator!=(const V2d &other) const {
+		return !(*this == other);
+	}
 };
 struct V3d {
     float x, y, z;
+
+	bool operator==(const V3d &other) const {
+		return x == other.x && y == other.y && z == other.z;
+	}
+	bool operator!=(const V3d &other) const {
+		return !(*this == other);
+	}
 };
 
 struct V4d {
     float x, y, z, w;
+	bool operator==(const V4d &other) const {
+		return x == other.x && y == other.y && z == other.z && w == other.w;
+	}
+	bool operator!=(const V4d &other) const {
+		return !(*this == other);
+	}
 };
 
 struct Plane

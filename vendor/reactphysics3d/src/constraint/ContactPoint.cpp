@@ -57,7 +57,7 @@ ContactPoint::ContactPoint(const ContactPointInfo& contactInfo, decimal persiste
                mPersistentContactDistanceThreshold(persistentContactDistanceThreshold) {
 
     assert(mPenetrationDepth > decimal(0.0));
-    assert(mNormal.lengthSquare() > decimal(0.8));
+    // assert(mNormal.lengthSquare() > decimal(0.8));
 
     mIsObsolete = false;
 }

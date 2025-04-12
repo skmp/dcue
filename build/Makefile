@@ -14,7 +14,7 @@ DATA_DIR=repack-data/tlj
 # include common.mk
 include reactphysics3d.mk
 OBJS = \
-	../main.o ../vendor/gldc/alloc.o ../hierarchy.o ../components.o ../animations.o ../cameras.o ../scripts.o \
+	../main.o ../vendor/gldc/alloc.o ../hierarchy.o ../components.o ../animations.o ../cameras.o ../scripts.o ../physics.o \
 	\
 	$(RP3D_OBJECTS)
 

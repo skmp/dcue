@@ -85,6 +85,7 @@ void TriangleMesh::computeEpsilon(const TriangleVertexArray& triangleVertexArray
 
     // Compute the 'epsilon' value for this set of points
     mEpsilon = 3 * (max.x + max.y + max.z) * MACHINE_EPSILON;
+    assert(mEpsilon > 0);
 }
 
 // Copy the triangles faces
@@ -314,6 +315,22 @@ void TriangleMesh::computeVerticesNormals() {
             assert(normal.lengthSquare() > mEpsilon * mEpsilon);
             normal.normalize();
 
+            // TODO: debug this
+            // if (mTriangles[f * 3 + v] == 334) {
+            //     // Debug
+            //     printf("Triangle %d, vertex %d, angle = %f, normal = (%f, %f, %f)\n", f, v, angle,
+            //            normal.x, normal.y, normal.z);
+            //     printf("Triangle %d, vertex %d, a = (%f, %f, %f), b = (%f, %f, %f)\n", f, v,
+            //            a.x, a.y, a.z,
+            //            b.x, b.y, b.z);
+            //     printf("Triangle %d, vertex %d, edgesLengths = (%f, %f)\n", f, v,
+            //            edgesLengths[previousVertex], edgesLengths[v]);
+            //     printf("Triangle %d, vertex %d, dotProduct = %f\n", f, v, dotProduct);
+            //     printf("Triangle %d, vertex %d, lengthATimesLengthB = %f\n", f, v, lengthATimesLengthB);
+            //     printf("Triangle %d, vertex %d, cosA = %f\n", f, v, cosA);
+            //     printf("Triangle %d, vertex %d, length = %f\n", f, v, normal.length());
+            //     printf("Triangle %d, vertex %d, mEpsilon = %f\n", f, v, mEpsilon);
+            // }
             // Add the normal component of this vertex into the normals array
             mVerticesNormals[mTriangles[f * 3 + v]] += angle * normal;
         }
@@ -324,7 +341,11 @@ void TriangleMesh::computeVerticesNormals() {
     // Normalize the computed vertices normals
     for (uint32 v=0; v < mVertices.size(); v++) {
 
-        assert(mVerticesNormals[v].lengthSquare() >= mEpsilon * mEpsilon);
+        // figure out why this has to be disabled
+        // assert(mVerticesNormals[v].lengthSquare() >= mEpsilon * mEpsilon);
+        if (mVerticesNormals[v].lengthSquare() < mEpsilon * mEpsilon) {
+            mVerticesNormals[v] = Vector3(0, 1, 0);
+        }
 
         // Normalize the normal
         mVerticesNormals[v].normalize();

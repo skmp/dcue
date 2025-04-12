@@ -85,17 +85,17 @@ void PhysicsCommon::initBoxShapeHalfEdgeStructure() {
     MemoryAllocator& allocator = mMemoryManager.getHeapAllocator();
 
     // Faces
-    Array<uint> face0(allocator, 4);
+    Array<uint32> face0(allocator, 4);
     face0.add(0); face0.add(1); face0.add(2); face0.add(3);
-    Array<uint> face1(allocator, 4);
+    Array<uint32> face1(allocator, 4);
     face1.add(1); face1.add(5); face1.add(6); face1.add(2);
-    Array<uint> face2(allocator, 4);
+    Array<uint32> face2(allocator, 4);
     face2.add(4); face2.add(7); face2.add(6); face2.add(5);
-    Array<uint> face3(allocator, 4);
+    Array<uint32> face3(allocator, 4);
     face3.add(4); face3.add(0); face3.add(3); face3.add(7);
-    Array<uint> face4(allocator, 4);
+    Array<uint32> face4(allocator, 4);
     face4.add(4); face4.add(5); face4.add(1); face4.add(0);
-    Array<uint> face5(allocator, 4);
+    Array<uint32> face5(allocator, 4);
     face5.add(2); face5.add(6); face5.add(7); face5.add(3);
 
     mBoxShapeHalfEdgeStructure.addFace(face0);
@@ -119,9 +119,9 @@ void PhysicsCommon::initTriangleShapeHalfEdgeStructure() {
     MemoryAllocator& allocator = mMemoryManager.getHeapAllocator();
 
     // Faces
-    Array<uint> face0(allocator, 3);
+    Array<uint32> face0(allocator, 3);
     face0.add(0); face0.add(1); face0.add(2);
-    Array<uint> face1(allocator, 3);
+    Array<uint32> face1(allocator, 3);
     face1.add(0); face1.add(2); face1.add(1);
 
     mTriangleShapeHalfEdgeStructure.addFace(face0);

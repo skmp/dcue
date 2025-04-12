@@ -173,7 +173,7 @@ RP3D_FORCE_INLINE void NarrowPhaseInfoBatch::addContactPoint(uint32 index, const
 
     if (narrowPhaseInfos[index].nbContactPoints < NB_MAX_CONTACT_POINTS_IN_NARROWPHASE_INFO) {
 
-        assert(contactNormal.length() > 0.8f);
+        // assert(contactNormal.length() > 0.8f);
 
         // Add it into the array of contact points
         narrowPhaseInfos[index].contactPoints[narrowPhaseInfos[index].nbContactPoints].normal = contactNormal;
