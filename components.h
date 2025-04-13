@@ -39,6 +39,7 @@ enum component_type_t {
     ct_player_movement,
     ct_mouse_look,
     ct_interactable,
+    ct_interaction,
     
     // physics
     ct_box_collider,

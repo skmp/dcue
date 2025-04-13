@@ -9,9 +9,77 @@ using UnityEditor.Animations;
 using mango;
 using System.Linq;
 using Ludiq;
+using UnityEngine.UI;
 
 public class DreamExporter : MonoBehaviour
 {
+    [MenuItem("Dreamcast/Export Fonts")]
+    public static void ExportFonts()
+    {
+        var ds = CollectScene();
+
+        string fontCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+[]{}|;':\",.<>?/`~";
+
+
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("#include \"fonts.h\"");
+
+        for (int dfontNum = 0; dfontNum < ds.dfonts.Count; dfontNum++)
+        {
+            var dfont = ds.dfonts[dfontNum];
+            var font = dfont.font;
+
+            foreach (char c in fontCharacters)
+            {
+                font.RequestCharactersInTexture(c.ToString(), dfont.size, dfont.style);
+            }
+        }
+
+        for (int fontNum = 0; fontNum < ds.fonts.Count; fontNum++)
+        {
+            var font = ds.fonts[fontNum];
+
+            var atlas = GetReadableTexture(font.material.mainTexture);
+
+            File.WriteAllBytes($"font_{fontNum}.png", atlas.EncodeToPNG());
+
+            sb.AppendLine($"texture_t font_texture_{fontNum};");
+        }
+
+        for (int dfontNum = 0; dfontNum < ds.dfonts.Count; dfontNum++)
+        {
+            var dfont = ds.dfonts[dfontNum];
+            var font = dfont.font;
+
+            CharacterInfo chInfo;
+
+            sb.Append($"font_char_t font_chars_{dfontNum}[] = {{ ");
+            for (int i = 0; i < fontCharacters.Length; i++)
+            {
+                char c = fontCharacters[i];
+                if (!font.GetCharacterInfo(c, out chInfo, dfont.size, dfont.style))
+                {
+                    throw new Exception("Missing character " + c + " from font " + font.name);
+                }
+                sb.Append($"{{ {{ {chInfo.uvTopRight.x}, {chInfo.uvTopRight.y}, {chInfo.uvBottomLeft.x}, {chInfo.uvBottomLeft.y} }}, {{ {chInfo.minX}, {chInfo.minY}, {chInfo.maxX}, {chInfo.maxY} }}, {chInfo.advance} }}, ");
+            }
+            sb.AppendLine("};");
+
+            sb.Append($"font_t fonts_{dfontNum} = {{ ");
+            sb.Append($"&font_texture_{ds.fontIndex[font]}, font_chars_{dfontNum}, {dfont.size}, fs_{dfont.style}, ");
+            sb.AppendLine($"}}; //{dfont.font.name}");
+        }
+
+        sb.AppendLine("");
+        sb.AppendLine("void InitializeFonts() {");
+        for (int fontNum = 0; fontNum < ds.fonts.Count; fontNum++)
+        {
+            var font = ds.fonts[fontNum];
+            sb.AppendLine($" load_pvr(\"font_{fontNum}.pvr\", &font_texture_{fontNum});");
+        }
+        sb.AppendLine("};");
+        File.WriteAllText("fonts.cpp", sb.ToString());
+    }
     struct BakedMeshInfo
     {
         public int indicesId;
@@ -1191,6 +1259,51 @@ public class DreamExporter : MonoBehaviour
         }
     }
 
+    class DreamFont
+    {
+        public Font font;
+        public FontStyle style;
+        public int size;
+
+        public DreamFont(Font font, FontStyle style, int size)
+        {
+            this.font = font;
+            this.style = style;
+            this.size = size;
+        }
+
+        public override int GetHashCode()
+        {
+            return font.GetHashCode();
+        }
+
+        public override bool Equals(object obj)
+        {
+            var other = obj as DreamFont;
+
+            if (other != null)
+            {
+                return font == other.font && style == other.style && size == other.size;
+            }
+
+            return false;
+        }
+
+        // Overload == and != for consistency
+        public static bool operator ==(DreamFont left, DreamFont right)
+        {
+            if (left is null) return right is null;
+
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(DreamFont left, DreamFont right)
+        {
+            return !(left == right);
+        }
+    }
+
+
     class DreamScene
     {
         public HashSet<Material> materials = new HashSet<Material>();
@@ -1256,6 +1369,16 @@ public class DreamExporter : MonoBehaviour
 
         public List<MeshCollider> meshColliders;
         public Dictionary<MeshCollider, int> meshColliderIndex;
+
+        // ui
+        public List<Text> texts;
+        public Dictionary<Text, int> textIndex;
+
+        public List<DreamFont> dfonts;
+        public Dictionary<DreamFont, int> dfontIndex;
+
+        public List<Font> fonts;
+        public Dictionary<Font, int> fontIndex;
     }
 
     static Texture2D GetReadableTexture(Texture source)
@@ -1402,6 +1525,36 @@ public class DreamExporter : MonoBehaviour
         }
         ds.meshColliders = meshColliders.Where(mc => mc.sharedMesh != null).ToList();
         ds.meshColliderIndex = CreateComponentIndex(ds.meshColliders);
+
+        // ui
+        ds.texts = GetSceneComponents<Text>();
+        ds.textIndex = CreateComponentIndex(ds.texts);
+
+        ds.dfonts = new List<DreamFont>();
+        ds.dfontIndex = new Dictionary<DreamFont, int>();
+
+        foreach(var text in ds.texts)
+        {
+            var font = new DreamFont(text.font, text.fontStyle, text.fontSize);
+            if (!ds.dfonts.Contains(font))
+            {
+                ds.dfonts.Add(font);
+                ds.dfontIndex[font] = ds.dfonts.Count - 1;
+            }
+        }
+
+        ds.fonts = new List<Font>();
+        ds.fontIndex = new Dictionary<Font, int>();
+
+        foreach (var dfont in ds.dfonts)
+        {
+            var font = dfont.font;
+            if (!ds.fonts.Contains(font))
+            {
+                ds.fonts.Add(font);
+                ds.fontIndex[font] = ds.fonts.Count - 1;
+            }
+        }
 
         return ds;
     }

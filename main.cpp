@@ -7,6 +7,8 @@
 
 #include "vendor/dca3/float16.h"
 
+#include "unistd.h"
+
 #include <vector>
 #include <fstream>
 #include <iostream>
@@ -23,6 +25,7 @@
 #include "scripts.h"
 #include "cameras.h"
 #include "physics.h"
+#include "fonts.h"
 
 // #define DEBUG_PHYSICS
 
@@ -196,6 +199,68 @@ std::vector<material_t*> materials;
 std::vector<material_t**> material_groups;
 std::vector<mesh_t*> meshes;
 std::vector<game_object_t*> gameObjects;
+
+void load_pvr(const char *fname, texture_t* texture) {
+    FILE *tex = NULL;
+    PVRHeader HDR;
+
+    /* Open the PVR texture file */
+    tex = fopen(fname, "rb");
+
+    /* Read in the PVR texture file header */
+    fread(&HDR, 1, sizeof(PVRHeader), tex);
+
+    texture->flags = PVR_TXRFMT_TWIDDLED | PVR_TXRFMT_VQ_ENABLE;
+    texture->offs = 0;
+
+    if( memcmp( HDR.PVRT, "GBIX", 4 ) == 0 )
+    {
+        GlobalIndexHeader *gbixHdr = (GlobalIndexHeader*)&HDR;
+        if(gbixHdr->nCodebookSize > 0 && gbixHdr->nCodebookSize <= 256)
+        texture->offs = (256 - gbixHdr->nCodebookSize) * 4 * 2;
+        // Go Back 4 bytes and re-read teh PVR header
+        fseek(tex, -4, SEEK_CUR);
+        fread(&HDR, 1, sizeof(PVRHeader), tex);
+    }
+
+    // VQ or small VQ
+    assert(HDR.nDataFormat == 0x3 || HDR.nDataFormat == 0x10);
+    switch(HDR.nPixelFormat) {
+        case 0x0: // ARGB1555
+            texture->flags |= PVR_TXRFMT_ARGB1555;
+            break;
+        case 0x1: // RGB565
+            texture->flags |= PVR_TXRFMT_RGB565;
+            break;
+        case 0x2: // ARGB4444
+            texture->flags |= PVR_TXRFMT_ARGB4444;
+            break;
+        case 0x3: // YUV422
+            texture->flags |= PVR_TXRFMT_YUV422;
+            break;
+        default:
+            assert(false && "Invalid texture format");
+            break;
+    }
+
+    uint8_t temp[2048];
+    
+    size_t remaining = HDR.nTextureDataSize - 16;
+    texture->data = (pvr_ptr_t)alloc_malloc(&texture->data, remaining);
+    uintptr_t dst = (uintptr_t)texture->data;
+
+    while (remaining > 0) {
+        size_t to_read = remaining < sizeof(temp) ? remaining : sizeof(temp);
+        assert(fread(temp, 1, to_read, tex) == to_read);
+        
+        memcpy((void*)dst, temp, to_read);
+        remaining -= to_read;
+        dst += to_read;
+    }
+
+    texture->lw = __builtin_ctz(HDR.nWidth) - 3;
+    texture->lh = __builtin_ctz(HDR.nHeight) - 3;
+}
 
 bool loadScene(const char* scene) {
     std::ifstream in(scene, std::ios::binary);
@@ -2215,15 +2280,24 @@ void player_movement_t::update(float deltaTime) {
 	gameObject->position.z += movementZ;
 }
 
+const char* lookAtMessage = nullptr;
+
 class RaycastDumper: public reactphysics3d::RaycastCallback {
 	box_collider_t* collider = nullptr;
 public:
 	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
-		collider = (box_collider_t*)raycastInfo.collider->getUserData();
-		return raycastInfo.hitFraction;
+		auto collider2 = (box_collider_t*)raycastInfo.collider->getUserData();
+		if (collider2->gameObject->isActive()) {
+			collider = collider2;
+			return raycastInfo.hitFraction;
+		} else {
+			return -1;
+		}
 	}
 
 	void showMessage() {
+		lookAtMessage = nullptr;
+
 		if (collider) {
 			#if defined(DEBUG_LOOKAT)
 			pointedGameObject = collider->gameObject;
@@ -2232,7 +2306,8 @@ public:
 
 			if (auto component = collider->gameObject->getComponents<interactable_t>()) {
 				do {
-					std::cout << (*component)->lookAtMessage << std::endl;
+					lookAtMessage = (*component)->lookAtMessage;
+					/*
 					if ((*component)->messages) {
 						auto message = (*component)->messages;
 						
@@ -2240,6 +2315,7 @@ public:
 							std::cout << *message << std::endl;
 						} while (*++message);
 					}
+					*/
 				} while (*++component);
 			}
 		}
@@ -2436,7 +2512,144 @@ void mesh_collider_t::update(float deltaTime) {
 reactphysics3d::PhysicsCommon physicsCommon;
 reactphysics3d::PhysicsWorld* physicsWorld = nullptr;
 
+extern font_t fonts_18;
 
+void measureText(font_t* font, const char* text, float* width, float* height) {
+	auto len = strlen(text);
+	float x = 0;
+	float y = 0;
+
+	*width = 0;
+	for (size_t i = 0; i < len; i++) {
+		auto c = text[i];
+		if (c == '\n') {
+			*width = std::max(*width, x);
+			x = 0;
+			y += 30;
+			continue;
+		}
+		int glyphId = -1;
+		for (int j = 0; j < FONT_CHAR_COUNT; j++) {
+			if (fontChars[j] == c) {
+				glyphId = j;
+				break;
+			}
+		}
+		if (glyphId == -1) {
+			x += 30;
+			continue;
+		}
+		auto glyph = &font->chars[glyphId];
+		
+		x += glyph->advance;
+	}
+
+	*width = std::max(*width, x);
+	*height = std::max(*height, y + 30);
+}
+
+void drawText(font_t* font, float x, float y, const char* text, float a, float r, float g, float b) {
+	pvr_poly_hdr_t hdr;
+	pvr_poly_cxt_txr_fast(
+		&hdr,
+		PVR_LIST_TR_POLY,
+
+		font->texture->flags,
+		font->texture->lw,
+		font->texture->lh,
+		(uint8_t*)font->texture->data - font->texture->offs,
+
+		PVR_FILTER_BILINEAR,
+
+		// flip_u, clamp_u, flip_v, clamp_v,
+		PVR_UVFLIP_NONE,
+		PVR_UVCLAMP_NONE,
+		PVR_UVFLIP_NONE,
+		PVR_UVCLAMP_NONE,
+		PVR_UVFMT_16BIT,
+
+		PVR_CLRFMT_4FLOATS,
+		PVR_BLEND_SRCALPHA,
+		PVR_BLEND_INVSRCALPHA,
+		PVR_DEPTHCMP_ALWAYS,
+		PVR_DEPTHWRITE_DISABLE,
+		PVR_CULLING_NONE,
+		PVR_FOG_DISABLE
+	);
+
+	pvr_prim(&hdr, sizeof(hdr));
+
+	y += 30;
+	auto len = strlen(text);
+	for (size_t i = 0; i < len; i++) {
+		auto c = text[i];
+		if (c == '\n') {
+			x = 0;
+			y += 30;
+			continue;
+		}
+		int glyphId = -1;
+		for (int j = 0; j < FONT_CHAR_COUNT; j++) {
+			if (fontChars[j] == c) {
+				glyphId = j;
+				break;
+			}
+		}
+		if (glyphId == -1) {
+			x += 30;
+			continue;
+		}
+		auto glyph = &font->chars[glyphId];
+		
+		pvr_vertex64_t vtx;
+
+		vtx.flags = PVR_CMD_VERTEX;
+		vtx.x = x + glyph->x0;
+		vtx.y = y - glyph->y1;
+		vtx.z = 1.0f;
+		vtx.u = float16(glyph->u1).raw;
+		vtx.v = float16(1-glyph->v0).raw;
+		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
+		pvr_prim(&vtx, sizeof(vtx));
+
+		vtx.flags = PVR_CMD_VERTEX;
+		vtx.x = x + glyph->x1;
+		vtx.y = y - glyph->y1;
+		vtx.z = 1.0f;
+		vtx.u = float16(glyph->u0).raw;
+		vtx.v = float16(1-glyph->v0).raw;
+		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
+		pvr_prim(&vtx, sizeof(vtx));
+
+		vtx.flags = PVR_CMD_VERTEX;
+		vtx.x = x + glyph->x0;
+		vtx.y = y - glyph->y0;
+		vtx.z = 1.0f;
+		vtx.u = float16(glyph->u1).raw;
+		vtx.v = float16(1-glyph->v1).raw;
+		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
+		pvr_prim(&vtx, sizeof(vtx));
+
+		vtx.flags = PVR_CMD_VERTEX_EOL;
+		vtx.x = x + glyph->x1;
+		vtx.y = y - glyph->y0;
+		vtx.z = 1.0f;
+		vtx.u = float16(glyph->u0).raw;
+		vtx.v = float16(1-glyph->v1).raw;
+		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
+		pvr_prim(&vtx, sizeof(vtx));
+
+		x += glyph->advance;
+	}
+}
+
+void drawTextCentered(font_t* font, float x, float y, const char* text, float a, float r, float g, float b) {
+	float width, height;
+	measureText(font, text, &width, &height);
+	x -= width / 2;
+	y -= height / 2;
+	drawText(font, x, y, text, a, r, g, b);
+}
 
 int main(int argc, const char** argv) {
 
@@ -2459,13 +2672,16 @@ int main(int argc, const char** argv) {
     pvr_init(&pvr_params);
 
     #if defined(DC_SH4)
-    loadScene("/cd/dream.ndt");
+	chdir("/cd");
     #else
-    loadScene("repack-data/tlj/dream.ndt");
+	chdir("repack-data/tlj");
     #endif
+
+	loadScene("dream.ndt");
 
     InitializeHierarchy(gameObjects);
 	InitializeComponents(gameObjects);
+	InitializeFonts();
 		
     unsigned currentStamp = 0;
 
@@ -2697,7 +2913,9 @@ int main(int argc, const char** argv) {
 				renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
             }
         }
-
+		if (lookAtMessage) {
+			drawTextCentered(&fonts_18, 320, 240, lookAtMessage, 1, 1, 0.1, 0.1);
+		}
 		#if defined(DEBUG_PHYSICS)
 		pvr_poly_hdr_t hdr;
 		pvr_poly_cxt_col_fast(

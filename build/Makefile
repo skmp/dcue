@@ -14,7 +14,7 @@ DATA_DIR=repack-data/tlj
 # include common.mk
 include reactphysics3d.mk
 OBJS = \
-	../main.o ../vendor/gldc/alloc.o ../hierarchy.o ../components.o ../animations.o ../cameras.o ../scripts.o ../physics.o \
+	../main.o ../vendor/gldc/alloc.o ../hierarchy.o ../components.o ../animations.o ../cameras.o ../scripts.o ../physics.o ../fonts.o \
 	\
 	$(RP3D_OBJECTS)
 
@@ -122,6 +122,17 @@ sim: $(TARGET_SIM)
 cdi: $(PROJECT_NAME).cdi
 	@echo && echo && echo "*** Build Completed Successfully ($(PROJECT_NAME).cdi) ***" && echo && echo
 
+repack-data/fonts.repacked: $(shell ls fonts/font_*.png) | pvrtex
+	@mkdir -p repack-data/tlj
+	@mkdir -p repack-data/fonts
+	@for i in $(shell ls fonts/font_*.png); do \
+		cp $${i} repack-data/fonts/; \
+		mogrify -resize '256x256>' repack-data/fonts/$$(basename $${i}); \
+		convert repack-data/fonts/$$(basename $${i}) -channel RGB -negate +channel repack-data/fonts/$$(basename $${i}); \
+		../vendor/pvrtex/pvrtex -i repack-data/fonts/$$(basename $${i}) -o repack-data/tlj/$$(basename $${i%.png}.pvr) -c small -d; \
+	done
+	@echo && echo && echo "*** Repacked Fonts ***" && echo && echo
+	@touch $@
 .PHONY: pvrtex cdi sim
 
 

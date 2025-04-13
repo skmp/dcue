@@ -14,3 +14,4 @@ extern timed_activeinactive_t* timed_activeinactives[];
 extern fadein_t* fadeins[];
 extern player_movement_t* player_movements[];
 extern mouse_look_t* mouse_looks[];
+extern interactable_t* interactables[];
