@@ -2281,7 +2281,8 @@ void player_movement_t::update(float deltaTime) {
 }
 
 const char* lookAtMessage = nullptr;
-
+const char** lookAtAction = nullptr;
+int lookAtActionIndex = -1;
 class RaycastDumper: public reactphysics3d::RaycastCallback {
 	box_collider_t* collider = nullptr;
 public:
@@ -2307,15 +2308,9 @@ public:
 			if (auto component = collider->gameObject->getComponents<interactable_t>()) {
 				do {
 					lookAtMessage = (*component)->lookAtMessage;
-					/*
 					if ((*component)->messages) {
-						auto message = (*component)->messages;
-						
-						do {
-							std::cout << *message << std::endl;
-						} while (*++message);
+						lookAtAction = (*component)->messages;
 					}
-					*/
 				} while (*++component);
 			}
 		}
@@ -2512,12 +2507,14 @@ void mesh_collider_t::update(float deltaTime) {
 reactphysics3d::PhysicsCommon physicsCommon;
 reactphysics3d::PhysicsWorld* physicsWorld = nullptr;
 
-extern font_t fonts_18;
+extern font_t fonts_0;
+extern font_t fonts_19;
 
-void measureText(font_t* font, const char* text, float* width, float* height) {
+void measureText(font_t* font, float em, const char* text, float* width, float* height) {
 	auto len = strlen(text);
 	float x = 0;
 	float y = 0;
+	float scale = 0.4f;
 
 	*width = 0;
 	for (size_t i = 0; i < len; i++) {
@@ -2525,7 +2522,7 @@ void measureText(font_t* font, const char* text, float* width, float* height) {
 		if (c == '\n') {
 			*width = std::max(*width, x);
 			x = 0;
-			y += 30;
+			y += em;
 			continue;
 		}
 		int glyphId = -1;
@@ -2536,19 +2533,22 @@ void measureText(font_t* font, const char* text, float* width, float* height) {
 			}
 		}
 		if (glyphId == -1) {
-			x += 30;
+			x += em;
 			continue;
 		}
 		auto glyph = &font->chars[glyphId];
 		
-		x += glyph->advance;
+		x += glyph->advance * scale;
 	}
 
 	*width = std::max(*width, x);
-	*height = std::max(*height, y + 30);
+	*height = std::max(*height, y + em);
 }
 
-void drawText(font_t* font, float x, float y, const char* text, float a, float r, float g, float b) {
+void drawText(font_t* font, float em, float x, float y, const char* text, float a, float r, float g, float b, float resetx = 0) {
+
+	float scale = 0.4f;
+
 	pvr_poly_hdr_t hdr;
 	pvr_poly_cxt_txr_fast(
 		&hdr,
@@ -2579,13 +2579,13 @@ void drawText(font_t* font, float x, float y, const char* text, float a, float r
 
 	pvr_prim(&hdr, sizeof(hdr));
 
-	y += 30;
+	y += em;
 	auto len = strlen(text);
 	for (size_t i = 0; i < len; i++) {
 		auto c = text[i];
 		if (c == '\n') {
-			x = 0;
-			y += 30;
+			x = resetx;
+			y += em;
 			continue;
 		}
 		int glyphId = -1;
@@ -2596,7 +2596,7 @@ void drawText(font_t* font, float x, float y, const char* text, float a, float r
 			}
 		}
 		if (glyphId == -1) {
-			x += 30;
+			x += em;
 			continue;
 		}
 		auto glyph = &font->chars[glyphId];
@@ -2604,8 +2604,8 @@ void drawText(font_t* font, float x, float y, const char* text, float a, float r
 		pvr_vertex64_t vtx;
 
 		vtx.flags = PVR_CMD_VERTEX;
-		vtx.x = x + glyph->x0;
-		vtx.y = y - glyph->y1;
+		vtx.x = x + glyph->x0*scale;
+		vtx.y = y - glyph->y1*scale;
 		vtx.z = 1.0f;
 		vtx.u = float16(glyph->u1).raw;
 		vtx.v = float16(1-glyph->v0).raw;
@@ -2613,8 +2613,8 @@ void drawText(font_t* font, float x, float y, const char* text, float a, float r
 		pvr_prim(&vtx, sizeof(vtx));
 
 		vtx.flags = PVR_CMD_VERTEX;
-		vtx.x = x + glyph->x1;
-		vtx.y = y - glyph->y1;
+		vtx.x = x + glyph->x1*scale;
+		vtx.y = y - glyph->y1*scale;
 		vtx.z = 1.0f;
 		vtx.u = float16(glyph->u0).raw;
 		vtx.v = float16(1-glyph->v0).raw;
@@ -2622,8 +2622,8 @@ void drawText(font_t* font, float x, float y, const char* text, float a, float r
 		pvr_prim(&vtx, sizeof(vtx));
 
 		vtx.flags = PVR_CMD_VERTEX;
-		vtx.x = x + glyph->x0;
-		vtx.y = y - glyph->y0;
+		vtx.x = x + glyph->x0*scale;
+		vtx.y = y - glyph->y0*scale;
 		vtx.z = 1.0f;
 		vtx.u = float16(glyph->u1).raw;
 		vtx.v = float16(1-glyph->v1).raw;
@@ -2631,24 +2631,32 @@ void drawText(font_t* font, float x, float y, const char* text, float a, float r
 		pvr_prim(&vtx, sizeof(vtx));
 
 		vtx.flags = PVR_CMD_VERTEX_EOL;
-		vtx.x = x + glyph->x1;
-		vtx.y = y - glyph->y0;
+		vtx.x = x + glyph->x1*scale;
+		vtx.y = y - glyph->y0*scale;
 		vtx.z = 1.0f;
 		vtx.u = float16(glyph->u0).raw;
 		vtx.v = float16(1-glyph->v1).raw;
 		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
 		pvr_prim(&vtx, sizeof(vtx));
 
-		x += glyph->advance;
+		x += glyph->advance*scale;
 	}
 }
 
-void drawTextCentered(font_t* font, float x, float y, const char* text, float a, float r, float g, float b) {
+void drawTextCentered(font_t* font, float em, float x, float y, const char* text, float a, float r, float g, float b) {
 	float width, height;
-	measureText(font, text, &width, &height);
+	measureText(font, em, text, &width, &height);
 	x -= width / 2;
 	y -= height / 2;
-	drawText(font, x, y, text, a, r, g, b);
+	drawText(font, em, x, y, text, a, r, g, b);
+}
+
+void drawTextRightBottom(font_t* font, float em, float x, float y, const char* text, float a, float r, float g, float b) {
+	float width, height;
+	measureText(font, em, text, &width, &height);
+	x -= width;
+	y -= height;
+	drawText(font, em, x, y, text, a, r, g, b, x);
 }
 
 int main(int argc, const char** argv) {
@@ -2742,6 +2750,15 @@ int main(int argc, const char** argv) {
 				if (state->ltrig > 64) {
 					deltaTime *= state->ltrig / 25.f;
 				}
+
+				static bool last_b = false;
+				if (!last_b && state->b && lookAtAction) {
+					lookAtActionIndex++;
+					if (lookAtAction[lookAtActionIndex] == nullptr) {
+						lookAtActionIndex = -1;
+					}
+				}
+				last_b = state->b;
             }
         }
         
@@ -2913,8 +2930,10 @@ int main(int argc, const char** argv) {
 				renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
             }
         }
-		if (lookAtMessage) {
-			drawTextCentered(&fonts_18, 320, 240, lookAtMessage, 1, 1, 0.1, 0.1);
+		if (lookAtAction && lookAtActionIndex != -1) {
+			drawTextRightBottom(&fonts_0, 11, 600, 440, lookAtAction[lookAtActionIndex], 1, 1, 1, 1);
+		} else if (lookAtMessage) {
+			drawTextCentered(&fonts_19, 24, 320, 240, lookAtMessage, 1, 1, 0.1, 0.1);
 		}
 		#if defined(DEBUG_PHYSICS)
 		pvr_poly_hdr_t hdr;
