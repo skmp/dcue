@@ -2122,6 +2122,13 @@ extern "C" const char* getExecutableTag() {
 	return "tlj "  ":" ;
 }
 
+const char* lookAtMessage = nullptr;
+const char* messageSpeaker = nullptr;
+const char* messageText = nullptr;
+
+const char** lookAtAction = nullptr;
+int lookAtActionIndex = -1;
+
 void setGameObject(component_type_t type, component_base_t* component, native::game_object_t* gameObject) {
     if (type >= ct_interaction) {
         auto interaction = (interaction_t*)component;
@@ -2242,6 +2249,7 @@ void proximity_interactable_t::update(float deltaTime) {
 	}
 }
 
+// interactions
 void game_object_activeinactive_t::interact() {
 	if (gameObjectToToggle != SIZE_MAX) {
 		gameObjects[gameObjectToToggle]->setActive(setTo);
@@ -2270,6 +2278,62 @@ void timed_activeinactive_t::interact() {
 
 void fadein_t::interact() {
 	// TODO
+}
+
+void show_message_t::interact() {
+	if (messages) {
+		nextMessage();
+		if (timedHide) {
+			timeToGo = time;
+			if (timedHideCameraLock) {
+				// TODO pavo push state
+			}
+		} else {
+			// TODO pavo push state
+		}
+	}
+}
+
+// todo: onInteraction (pavo)
+
+bool show_message_t::nextMessage() {
+	if (messages[currentMessageIndex] == nullptr || !oneShot) {
+		if (messages[currentMessageIndex] == nullptr) {
+			currentMessageIndex = 0;
+		}
+		
+		messageSpeaker = nullptr;
+		messageText = nullptr;
+		// TODO: messaging unfocused (this)
+		return false;
+	} else {
+		const char* msg = messages[currentMessageIndex++];
+		while (messages[currentMessageIndex] && strlen(messages[currentMessageIndex]) == 0) {
+			currentMessageIndex++;
+		}
+
+		bool isLast = messages[currentMessageIndex] == nullptr;
+
+		// messaging.TypeMessage(this, msg, (!isLast || AlwaysShowHasMoreIndicator) && ShowHasMoreIndicator, SpeakerName);
+		messageSpeaker = speakerName;
+		messageText = msg;
+		return true;
+	}
+}
+
+void show_message_t::update(float deltaTime) {
+	if (timedHide && timeToGo > 0) {
+		timeToGo -= deltaTime;
+		if (timeToGo <= 0) {
+			if (nextMessage()) {
+				timeToGo = time;
+			} else {
+				if (timedHideCameraLock) {
+					// TODO pavo pop state
+				}
+			}
+		}
+	}
 }
 
 void player_movement_t::update(float deltaTime) {
@@ -2302,9 +2366,6 @@ void player_movement_t::update(float deltaTime) {
 	gameObject->position.z += movementZ;
 }
 
-const char* lookAtMessage = nullptr;
-const char** lookAtAction = nullptr;
-int lookAtActionIndex = -1;
 class RaycastDumper: public reactphysics3d::RaycastCallback {
 	box_collider_t* collider = nullptr;
 public:
@@ -2320,7 +2381,7 @@ public:
 
 	void showMessage() {
 		lookAtMessage = nullptr;
-
+		const char** newLookAtAction = nullptr;
 		if (collider) {
 			#if defined(DEBUG_LOOKAT)
 			pointedGameObject = collider->gameObject;
@@ -2331,11 +2392,16 @@ public:
 				do {
 					lookAtMessage = (*component)->lookAtMessage;
 					if ((*component)->messages) {
-						lookAtAction = (*component)->messages;
+						newLookAtAction = (*component)->messages;
 					}
 					break;
 				} while (*++component);
 			}
+		}
+
+		if (newLookAtAction != lookAtAction) {
+			lookAtAction = newLookAtAction;
+			lookAtActionIndex = -1;
 		}
 	}
 };
@@ -2531,6 +2597,7 @@ reactphysics3d::PhysicsCommon physicsCommon;
 reactphysics3d::PhysicsWorld* physicsWorld = nullptr;
 
 extern font_t fonts_0;
+extern font_t fonts_1;
 extern font_t fonts_19;
 
 void measureText(font_t* font, float em, const char* text, float* width, float* height) {
@@ -2672,13 +2739,20 @@ void drawTextCentered(font_t* font, float em, float x, float y, const char* text
 	measureText(font, em, text, &width, &height);
 	x -= width / 2;
 	y -= height / 2;
-	drawText(font, em, x, y, text, a, r, g, b);
+	drawText(font, em, x, y, text, a, r, g, b, x);
 }
 
 void drawTextRightBottom(font_t* font, float em, float x, float y, const char* text, float a, float r, float g, float b) {
 	float width, height;
 	measureText(font, em, text, &width, &height);
 	x -= width;
+	y -= height;
+	drawText(font, em, x, y, text, a, r, g, b, x);
+}
+
+void drawTextLeftBottom(font_t* font, float em, float x, float y, const char* text, float a, float r, float g, float b) {
+	float width, height;
+	measureText(font, em, text, &width, &height);
 	y -= height;
 	drawText(font, em, x, y, text, a, r, g, b, x);
 }
@@ -2778,8 +2852,12 @@ int main(int argc, const char** argv) {
 				static bool last_b = false;
 				if (!last_b && state->b && lookAtAction) {
 					lookAtActionIndex++;
-					if (lookAtAction[lookAtActionIndex] == nullptr) {
+					if (!lookAtAction || lookAtAction[lookAtActionIndex] == nullptr) {
 						lookAtActionIndex = -1;
+						messageSpeaker = nullptr;
+						messageText = nullptr;
+					} else {
+						messageText = lookAtAction[lookAtActionIndex];
 					}
 				}
 				last_b = state->b;
@@ -2805,6 +2883,18 @@ int main(int argc, const char** argv) {
 				(*proximity_interactable)->update(deltaTime);
 			}
 		}
+		for (auto player_movement = player_movements; *player_movement; player_movement++) {
+			if ((*player_movement)->gameObject->isActive()) {
+				(*player_movement)->update(deltaTime);
+			}
+		}
+		for (auto mouse_look = mouse_looks; *mouse_look; mouse_look++) {
+			if ((*mouse_look)->gameObject->isActive()) {
+				(*mouse_look)->update(deltaTime);
+			}
+		}
+
+		// interactions
 		for (auto game_object_activeinactive = game_object_activeinactives; *game_object_activeinactive; game_object_activeinactive++) {
 			if ((*game_object_activeinactive)->gameObject->isActive()) {
 				//(*game_object_activeinactive)->update(deltaTime);
@@ -2820,14 +2910,9 @@ int main(int argc, const char** argv) {
 				//(*fadein)->update(deltaTime);
 			}
 		}
-		for (auto player_movement = player_movements; *player_movement; player_movement++) {
-			if ((*player_movement)->gameObject->isActive()) {
-				(*player_movement)->update(deltaTime);
-			}
-		}
-		for (auto mouse_look = mouse_looks; *mouse_look; mouse_look++) {
-			if ((*mouse_look)->gameObject->isActive()) {
-				(*mouse_look)->update(deltaTime);
+		for (auto show_message = show_messages; *show_message; show_message++) {
+			if ((*show_message)->gameObject->isActive()) {
+				(*show_message)->update(deltaTime);
 			}
 		}
 
@@ -2958,8 +3043,11 @@ int main(int argc, const char** argv) {
 		// drawTextCentered(&fonts_19, 24, 320, 240, "Hello M World", 1, 1, 0.1, 0.1);
 		// drawTextCentered(&fonts_0, 11, 320, 240 + 100, "Hello M World", 1, 1, 0.1, 0.1);
 
-		if (lookAtAction && lookAtActionIndex != -1) {
-			drawTextRightBottom(&fonts_0, 11, 600, 440, lookAtAction[lookAtActionIndex], 1, 1, 1, 1);
+		if (messageText) {
+			if (messageSpeaker) {
+				drawTextLeftBottom(&fonts_1, 20, 40, 390, messageSpeaker, 1, 1, 1, 1);
+			}
+			drawTextLeftBottom(&fonts_0, 15, 40, 440, messageText, 1, 1, 1, 1);
 		} else if (lookAtMessage) {
 			drawTextCentered(&fonts_19, 24, 320, 240, lookAtMessage, 1, 1, 0.1, 0.1);
 		}

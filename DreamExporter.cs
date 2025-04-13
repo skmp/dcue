@@ -11,6 +11,7 @@ using System.Linq;
 using Ludiq;
 using UnityEngine.UI;
 using Pavo.Behaviors;
+using Pavo;
 
 public class DreamExporter : MonoBehaviour
 {
@@ -470,10 +471,24 @@ public class DreamExporter : MonoBehaviour
         return $"\"{v.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r")}\"";
     }
 
+    static string escapeCodeStringOrNull(string v)
+    {
+        if (v == null || v.Length == 0)
+        {
+            return "nullptr";
+        }
+        else
+        {
+            return escapeCodeString(v);
+        }
+    }
+
+    // interactions
     static Dictionary<Type, string> supportedInteractionTypes = new Dictionary<Type, string>() {
        { typeof(gameobjectactiveinactive2), "game_object_activeinactive" },
        { typeof(timedactiveinactive), "timed_activeinactive" },
        { typeof(Fadein), "fadein" },
+       { typeof(ShowMessage), "show_message" },
     };
 
     // scripts
@@ -562,6 +577,7 @@ public class DreamExporter : MonoBehaviour
         //////////////
         ////////////// INTERACTIONS ///////////////
         //////////////
+        // interactions
 
         ////////////// game_object_activeinactive //////////
         for (int gameObjectActiveInactiveNum = 0; gameObjectActiveInactiveNum < ds.gameobjectactiveinactive2s.Count; gameObjectActiveInactiveNum++)
@@ -597,6 +613,27 @@ public class DreamExporter : MonoBehaviour
         }
         GenerateComponentArray(ds, sb, "fadein", ds.fadeins);
 
+        /////////////// show_message ///////////////
+        for (int showMessageNum = 0; showMessageNum < ds.showMessages.Count; showMessageNum++)
+        {
+            var showMessage = ds.showMessages[showMessageNum];
+            string message = "nullptr";
+            if (showMessage.message.Length != 0)
+            {
+                sb.AppendLine($"static const char* show_message_{showMessageNum}_messages[] = {{ {string.Join(", ", showMessage.message.Select(x => escapeCodeString(x)).ToArray())}, nullptr, }};");
+                message = $"show_message_{showMessageNum}_messages";
+            }
+
+            sb.Append($"show_message_t show_message_{showMessageNum} = {{ ");
+            sb.Append($"nullptr, {showMessage.Index}, {showMessage.blocking.ToString().ToLower()}, ");
+            sb.Append($"{message}, {showMessage.ShowHasMoreIndicator.ToString().ToLower()}, {showMessage.AlwaysShowHasMoreIndicator.ToString().ToLower()}, ");
+            sb.Append($"{escapeCodeStringOrNull(showMessage.SpeakerName)}, {showMessage.TimedHide.ToString().ToLower()}, {showMessage.TimedHideCameraLock.ToString().ToLower()}, ");
+            sb.Append($"{showMessage.time}, {showMessage.OneShot.ToString().ToLower()}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "show_message", ds.showMessages);
+
+
 
         File.WriteAllText("scripts.cpp", sb.ToString());
     }
@@ -627,6 +664,7 @@ public class DreamExporter : MonoBehaviour
         GenerateComponentDeclarations(ds, sb, "game_object_activeinactive", ds.gameobjectactiveinactive2s, ds.gameobjectactiveinactive2Index, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "timed_activeinactive", ds.timedactiveinactives, ds.timedactiveinactiveIndex, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "fadein", ds.fadeins, ds.fadeinIndex, interactionsIndex);
+        GenerateComponentDeclarations(ds, sb, "show_message", ds.showMessages, ds.showMessageIndex, interactionsIndex);
 
         // interaction lists
         GenerateInteractionDeclarations(ds, sb, interactionsIndex);
@@ -1429,6 +1467,16 @@ public class DreamExporter : MonoBehaviour
         public List<ProximityInteractable> proximityInteractables;
         public Dictionary<ProximityInteractable, int> proximityInteractableIndex;
 
+        public List<PlayerMovement2> playerMovement2s;
+        public Dictionary<PlayerMovement2, int> playerMovement2Index;
+
+        public List<MouseLook> mouseLooks;
+        public Dictionary<MouseLook, int> mouseLookIndex;
+
+        public List<Interactable> interactables;
+        public Dictionary<Interactable, int> interactableIndex;
+
+        // interactions
         public List<gameobjectactiveinactive2> gameobjectactiveinactive2s;
         public Dictionary<gameobjectactiveinactive2, int> gameobjectactiveinactive2Index;
 
@@ -1438,14 +1486,8 @@ public class DreamExporter : MonoBehaviour
         public List<Fadein> fadeins;
         public Dictionary<Fadein, int> fadeinIndex;
 
-        public List<PlayerMovement2> playerMovement2s;
-        public Dictionary<PlayerMovement2, int> playerMovement2Index;
-
-        public List<MouseLook> mouseLooks;
-        public Dictionary<MouseLook, int> mouseLookIndex;
-
-        public List<Interactable> interactables;
-        public Dictionary<Interactable, int> interactableIndex;
+        public List<ShowMessage> showMessages;
+        public Dictionary<ShowMessage, int> showMessageIndex;
 
         // Physics
         public List<Rigidbody> rigidbodies;
@@ -1577,6 +1619,16 @@ public class DreamExporter : MonoBehaviour
         ds.proximityInteractables = GetSceneComponents<ProximityInteractable>();
         ds.proximityInteractableIndex = CreateComponentIndex(ds.proximityInteractables);
         
+        ds.mouseLooks = GetSceneComponents<MouseLook>();
+        ds.mouseLookIndex = CreateComponentIndex(ds.mouseLooks);
+
+        ds.interactables = GetSceneComponents<Interactable>();
+        ds.interactableIndex = CreateComponentIndex(ds.interactables);
+
+        ds.playerMovement2s = GetSceneComponents<PlayerMovement2>();
+        ds.playerMovement2Index = CreateComponentIndex(ds.playerMovement2s);
+
+        // interactions
         ds.gameobjectactiveinactive2s = GetSceneComponents<gameobjectactiveinactive2>();
         ds.gameobjectactiveinactive2Index = CreateComponentIndex(ds.gameobjectactiveinactive2s);
 
@@ -1586,14 +1638,8 @@ public class DreamExporter : MonoBehaviour
         ds.fadeins = GetSceneComponents<Fadein>();
         ds.fadeinIndex = CreateComponentIndex(ds.fadeins);
 
-        ds.playerMovement2s = GetSceneComponents<PlayerMovement2>();
-        ds.playerMovement2Index = CreateComponentIndex(ds.playerMovement2s);
-
-        ds.mouseLooks = GetSceneComponents<MouseLook>();
-        ds.mouseLookIndex = CreateComponentIndex(ds.mouseLooks);
-
-        ds.interactables = GetSceneComponents<Interactable>();
-        ds.interactableIndex = CreateComponentIndex(ds.interactables);
+        ds.showMessages = GetSceneComponents<ShowMessage>();
+        ds.showMessageIndex = CreateComponentIndex(ds.showMessages);
 
         // Physics
         ds.rigidbodies = GetSceneComponents<Rigidbody>();

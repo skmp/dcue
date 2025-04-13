@@ -20,6 +20,7 @@ struct interactable_t;
 struct game_object_activeinactive_t;
 struct timed_activeinactive_t;
 struct fadein_t;
+struct show_message_t;
 
 // interaction list
 struct interaction_t;
@@ -52,6 +53,7 @@ enum component_type_t {
     ct_game_object_activeinactive,
     ct_timed_activeinactive,
     ct_fadein,
+    ct_show_message,
 
     ct_eol = -1
 };
@@ -79,6 +81,7 @@ struct component_t {
         game_object_activeinactive_t** gameObjectActiveinactives;
         timed_activeinactive_t** timedActiveinactives;
         fadein_t** fadeins;
+        show_message_t** showMessages;
 
         // interactions list
         interaction_t** interactions;
