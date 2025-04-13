@@ -31,7 +31,7 @@ static const char fontChars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstu
 
 struct font_char_t {
     struct {
-        float u0, v0, u1, v1;
+        float u0, v0, u1, v1, u2, v2, u3, v3;
     };
     struct {
         float x0, y0, x1, y1;

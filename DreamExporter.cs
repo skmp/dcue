@@ -61,7 +61,7 @@ public class DreamExporter : MonoBehaviour
                 {
                     throw new Exception("Missing character " + c + " from font " + font.name);
                 }
-                sb.Append($"{{ {{ {chInfo.uvTopRight.x}, {chInfo.uvTopRight.y}, {chInfo.uvBottomLeft.x}, {chInfo.uvBottomLeft.y} }}, {{ {chInfo.minX}, {chInfo.minY}, {chInfo.maxX}, {chInfo.maxY} }}, {chInfo.advance} }}, ");
+                sb.Append($"{{ {{ {chInfo.uvTopRight.x}, {chInfo.uvTopRight.y}, {chInfo.uvTopLeft.x}, {chInfo.uvTopLeft.y}, {chInfo.uvBottomLeft.x}, {chInfo.uvBottomLeft.y}, {chInfo.uvBottomRight.x}, {chInfo.uvBottomRight.y} }}, {{ {chInfo.minX}, {chInfo.minY}, {chInfo.maxX}, {chInfo.maxY} }}, {chInfo.advance} }}, ");
             }
             sb.AppendLine("};");
 

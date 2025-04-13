@@ -2311,8 +2311,10 @@ public:
 					if ((*component)->messages) {
 						lookAtAction = (*component)->messages;
 					}
+					break;
 				} while (*++component);
 			}
+			printf("LookAtMsg: %p, %p\n", lookAtMessage, lookAtAction);
 		}
 	}
 };
@@ -2604,38 +2606,38 @@ void drawText(font_t* font, float em, float x, float y, const char* text, float 
 		pvr_vertex64_t vtx;
 
 		vtx.flags = PVR_CMD_VERTEX;
+		vtx.x = x + glyph->x1*scale;
+		vtx.y = y - glyph->y1*scale;
+		vtx.z = 1.0f;
+		vtx.u = float16(glyph->u0).raw;
+		vtx.v = float16(1 - glyph->v0).raw;
+		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
+		pvr_prim(&vtx, sizeof(vtx));
+
+		vtx.flags = PVR_CMD_VERTEX;
 		vtx.x = x + glyph->x0*scale;
 		vtx.y = y - glyph->y1*scale;
 		vtx.z = 1.0f;
 		vtx.u = float16(glyph->u1).raw;
-		vtx.v = float16(1-glyph->v0).raw;
+		vtx.v = float16(1 - glyph->v1).raw;
 		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
 		pvr_prim(&vtx, sizeof(vtx));
 
 		vtx.flags = PVR_CMD_VERTEX;
 		vtx.x = x + glyph->x1*scale;
-		vtx.y = y - glyph->y1*scale;
-		vtx.z = 1.0f;
-		vtx.u = float16(glyph->u0).raw;
-		vtx.v = float16(1-glyph->v0).raw;
-		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
-		pvr_prim(&vtx, sizeof(vtx));
-
-		vtx.flags = PVR_CMD_VERTEX;
-		vtx.x = x + glyph->x0*scale;
 		vtx.y = y - glyph->y0*scale;
 		vtx.z = 1.0f;
-		vtx.u = float16(glyph->u1).raw;
-		vtx.v = float16(1-glyph->v1).raw;
+		vtx.u = float16(glyph->u3).raw;
+		vtx.v = float16(1 - glyph->v3).raw;
 		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
 		pvr_prim(&vtx, sizeof(vtx));
 
 		vtx.flags = PVR_CMD_VERTEX_EOL;
-		vtx.x = x + glyph->x1*scale;
+		vtx.x = x + glyph->x0*scale;
 		vtx.y = y - glyph->y0*scale;
 		vtx.z = 1.0f;
-		vtx.u = float16(glyph->u0).raw;
-		vtx.v = float16(1-glyph->v1).raw;
+		vtx.u = float16(glyph->u2).raw;
+		vtx.v = float16(1 - glyph->v2).raw;
 		vtx.a = a; vtx.r = r; vtx.g = g; vtx.b = b;
 		pvr_prim(&vtx, sizeof(vtx));
 
@@ -2930,6 +2932,10 @@ int main(int argc, const char** argv) {
 				renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
             }
         }
+
+		// drawTextCentered(&fonts_19, 24, 320, 240, "Hello M World", 1, 1, 0.1, 0.1);
+		// drawTextCentered(&fonts_0, 11, 320, 240 + 100, "Hello M World", 1, 1, 0.1, 0.1);
+
 		if (lookAtAction && lookAtActionIndex != -1) {
 			drawTextRightBottom(&fonts_0, 11, 600, 440, lookAtAction[lookAtActionIndex], 1, 1, 1, 1);
 		} else if (lookAtMessage) {
