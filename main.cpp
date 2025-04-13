@@ -2519,6 +2519,7 @@ void measureText(font_t* font, float em, const char* text, float* width, float* 
 	float scale = 0.4f;
 
 	*width = 0;
+	*height = 0;
 	for (size_t i = 0; i < len; i++) {
 		auto c = text[i];
 		if (c == '\n') {
