@@ -1804,6 +1804,10 @@ float GetMaxScale(const r_matrix_t& mat) {
     return std::max({scaleRight, scaleUp, scaleAt});
 }
 
+#if defined(DEBUG_LOOKAT)
+game_object_t* pointedGameObject = nullptr;
+#endif
+
 template<int list>
 void renderMesh(camera_t* cam, game_object_t* go) {
     if (vertexBufferFree() < freeVertexTarget) {
@@ -1908,6 +1912,17 @@ void renderMesh(camera_t* cam, game_object_t* go) {
         material.red = (1.0f / 255.0f) * go->materials[submesh_num]->color.red;
         material.green = (1.0f / 255.0f) * go->materials[submesh_num]->color.green;
         material.blue = (1.0f / 255.0f) * go->materials[submesh_num]->color.blue;
+
+		#if defined(DEBUG_LOOKAT)
+		if (pointedGameObject == go) {
+			residual.red = ambLight.red * ambient * 1;
+			residual.green = ambLight.green * ambient * 0;
+			residual.blue = ambLight.blue * ambient * 0;
+			material.red = (1.0f / 255.0f) * 1;
+			material.green = (1.0f / 255.0f) * 0;
+			material.blue = (1.0f / 255.0f) * 0;
+		}
+		#endif
 
 
         RGBAf lightDiffuseColors[MAX_LIGHTS];
@@ -2210,6 +2225,9 @@ public:
 
 	void showMessage() {
 		if (collider) {
+			#if defined(DEBUG_LOOKAT)
+			pointedGameObject = collider->gameObject;
+			#endif
 			std::cout << "Hit collider: " << collider << " gameObject " << collider->gameObject << std::endl;
 
 			if (auto component = collider->gameObject->getComponents<interactable_t>()) {
@@ -2250,6 +2268,9 @@ void mouse_look_t::update(float deltaTime) {
 	reactphysics3d::Vector3 cameraAt = {gameObject->ltw.at.x, gameObject->ltw.at.y, gameObject->ltw.at.z};
 	reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*100);
 
+	#if defined(DEBUG_LOOKAT)
+	pointedGameObject = nullptr;
+	#endif
 	RaycastDumper dumper;
 
 	// physics is one step behind here

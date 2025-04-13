@@ -4,16 +4,515 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using UnityEditor;
-using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using UnityEditor.Animations;
+using mango;
 using System.Linq;
 using Ludiq;
-using UnityEditor.ShaderGraph.Drawing;
-using Bolt;
 
 public class DreamExporter : MonoBehaviour
 {
+    struct BakedMeshInfo
+    {
+        public int indicesId;
+        public int verticesId;
+        public int numTriangles;
+        public int numVertices;
+    }
+    static BakedMeshInfo BakeCollisionMesh(Mesh mesh, Dictionary<string, int> all_indices, Dictionary<string, int> all_vertices)
+    {
+        var triangles = mesh.triangles;
+        List<Vector3> vertices = new List<Vector3>(mesh.vertices);
+        Dictionary<Vector3, int> processedVertices = new Dictionary<Vector3, int>();
+
+        var processedTriangles = new List<int>();
+
+        float machineEpsilon = 1.1920929E-6f;
+        Vector3 max = new Vector3();
+        foreach(var vertex in vertices)
+        {
+            if (max.x < Math.Abs(vertex.x))
+            {
+                max.x = Math.Abs(vertex.x);
+            }
+            if (max.y < Math.Abs(vertex.y))
+            {
+                max.y = Math.Abs(vertex.y);
+            }
+            if (max.z < Math.Abs(vertex.z))
+            {
+                max.z = Math.Abs(vertex.z);
+            }
+        }
+
+        float epsilon = 3 * (max.x + max.y + max.z) * machineEpsilon;
+
+        if (epsilon < 0.01f)
+        {
+            epsilon = 0.01f;
+        }
+
+        for (int i = 0; i < triangles.Length; i += 3)
+        {
+            float area = Vector3.Cross(vertices[triangles[i + 1]] - vertices[triangles[i]], vertices[triangles[i + 2]] - vertices[triangles[i]]).magnitude / 2.0f;
+            if (area < epsilon)
+            {
+                //Debug.LogWarning($"Triangle {i / 3} is degenerate, area: {area}");
+                continue;
+            }
+
+            if ((vertices[triangles[i + 1]] - vertices[triangles[i]]).magnitude < epsilon)
+            {
+                //Debug.LogWarning($"Triangle {i / 3} is degenerate, edge: {vertices[triangles[i + 1]] - vertices[triangles[i]]}");
+                continue;
+            }
+            if ((vertices[triangles[i + 2]] - vertices[triangles[i]]).magnitude < epsilon)
+            {
+                //Debug.LogWarning($"Triangle {i / 3} is degenerate, edge: {vertices[triangles[i + 2]] - vertices[triangles[i]]}");
+                continue;
+            }
+            if ((vertices[triangles[i + 2]] - vertices[triangles[i + 1]]).magnitude < epsilon)
+            {
+                //Debug.LogWarning($"Triangle {i / 3} is degenerate, edge: {vertices[triangles[i + 2]] - vertices[triangles[i + 1]]}");
+                continue;
+            }
+
+            int[] new_triangle = new int[3] { triangles[i], triangles[i + 1], triangles[i + 2] };
+
+            for (int j = 0; j < 3; j++)
+            {
+                if (!processedVertices.ContainsKey(vertices[new_triangle[j]]))
+                {
+                    processedVertices.Add(vertices[new_triangle[j]], processedVertices.Count);
+                }
+                new_triangle[j] = processedVertices[vertices[new_triangle[j]]];
+            }
+
+            // CCW for physics
+            processedTriangles.Add(new_triangle[0]);
+            processedTriangles.Add(new_triangle[1]);
+            processedTriangles.Add(new_triangle[2]);
+        }
+
+        var stringifiedTriangles = String.Join(", ", processedTriangles.ToArray());
+        StringBuilder sb = new StringBuilder();
+        foreach (var vertex in processedVertices.Keys)
+        {
+            sb.Append($"{vertex.x}, {vertex.y}, {vertex.z}, ");
+        }
+
+        var stringifiedVertices = sb.ToString();
+
+        if (!all_indices.ContainsKey(stringifiedTriangles))
+        {
+            all_indices.Add(stringifiedTriangles, all_indices.Count);
+        }
+
+        if (!all_vertices.ContainsKey(stringifiedVertices))
+        {
+            all_vertices.Add(stringifiedVertices, all_vertices.Count);
+        }
+        BakedMeshInfo rv;
+        rv.indicesId = all_indices[stringifiedTriangles];
+        rv.verticesId = all_vertices[stringifiedVertices];
+        rv.numTriangles = processedTriangles.Count;
+        rv.numVertices = processedVertices.Count;
+        //Debug.Log($"Baked mesh {mesh.name} with {rv.numTriangles} triangles and {rv.numVertices} vertices");
+        return rv;
+    }
+
+    static void ProcessPhysics(DreamScene ds)
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("#include <cstdint>");
+        sb.AppendLine("#include <cstddef>");
+        sb.AppendLine("#include \"physics.h\"");
+        sb.AppendLine("#include \"dcue/types-native.h\"");
+        sb.AppendLine("using namespace native;");
+
+        var all_vertices = new Dictionary<string, int>();
+        var all_indices = new Dictionary<string, int>();
+
+
+        StringBuilder meshCollidersStringBuilder = new StringBuilder();
+
+        // box colliders
+        sb.AppendLine();
+        for(int boxColliderNum = 0; boxColliderNum < ds.boxColliders.Count; boxColliderNum++)
+        {
+            var boxCollider = ds.boxColliders[boxColliderNum];
+            sb.Append($"box_collider_t box_collider_{boxColliderNum} = {{ ");
+            sb.Append($"nullptr, {{ {boxCollider.center.x}, {boxCollider.center.y}, {boxCollider.center.z} }}, {{ {boxCollider.size.x / 2}, {boxCollider.size.y / 2}, {boxCollider.size.z / 2} }} ");
+            sb.AppendLine("};");
+        }
+        sb.Append("box_collider_t* box_colliders[] = { ");
+        for (int boxColliderNum = 0; boxColliderNum < ds.boxColliders.Count; boxColliderNum++)
+        {
+            var boxCollider = ds.boxColliders[boxColliderNum];
+            sb.Append($"&box_collider_{boxColliderNum}, ");
+        }
+        sb.AppendLine("nullptr, };");
+
+        // sphere colliders
+        sb.AppendLine();
+        for (int sphereColliderNum = 0; sphereColliderNum < ds.sphereColliders.Count; sphereColliderNum++)
+        {
+            var sphereCollider = ds.sphereColliders[sphereColliderNum];
+            sb.Append($"sphere_collider_t sphere_collider_{sphereColliderNum} = {{ ");
+            sb.Append($"nullptr, {{ {sphereCollider.center.x}, {sphereCollider.center.y}, {sphereCollider.center.z} }}, {sphereCollider.radius} ");
+            sb.AppendLine("};");
+        }
+        sb.Append("sphere_collider_t* sphere_colliders[] = { ");
+        for (int sphereColliderNum = 0; sphereColliderNum < ds.sphereColliders.Count; sphereColliderNum++)
+        {
+            var sphereCollider = ds.sphereColliders[sphereColliderNum];
+            sb.Append($"&sphere_collider_{sphereColliderNum}, ");
+        }
+        sb.AppendLine("nullptr, };");
+
+        // capsule colliders
+        sb.AppendLine();
+        for (int capsuleColliderNum = 0; capsuleColliderNum < ds.capsuleColliders.Count; capsuleColliderNum++)
+        {
+            var capsuleCollider = ds.capsuleColliders[capsuleColliderNum];
+            sb.Append($"capsule_collider_t capsule_collider_{capsuleColliderNum} = {{ ");
+            sb.Append($"nullptr, {{ {capsuleCollider.center.x}, {capsuleCollider.center.y}, {capsuleCollider.center.z} }}, {capsuleCollider.radius}, {capsuleCollider.height} ");
+            sb.AppendLine("};");
+        }
+
+        sb.Append("capsule_collider_t* capsule_colliders[] = { ");
+        for (int capsuleColliderNum = 0; capsuleColliderNum < ds.capsuleColliders.Count; capsuleColliderNum++)
+        {
+            var capsuleCollider = ds.capsuleColliders[capsuleColliderNum];
+            sb.Append($"&capsule_collider_{capsuleColliderNum}, ");
+        }
+        sb.AppendLine("nullptr, };");
+
+        // mesh colliders
+        meshCollidersStringBuilder.AppendLine();
+        for (int meshColliderNum = 0; meshColliderNum < ds.meshColliders.Count; meshColliderNum++)
+        {
+            var meshCollider = ds.meshColliders[meshColliderNum];
+
+            var bakedMeshInfo = BakeCollisionMesh(meshCollider.sharedMesh, all_indices, all_vertices);
+
+            meshCollidersStringBuilder.Append($"mesh_collider_t mesh_collider_{meshColliderNum} = {{ ");
+            meshCollidersStringBuilder.Append($"nullptr, collision_mesh_vertices_{bakedMeshInfo.verticesId}, collision_mesh_indices_{bakedMeshInfo.indicesId}, {bakedMeshInfo.numVertices}, {bakedMeshInfo.numTriangles}, ");
+            meshCollidersStringBuilder.AppendLine("};");
+        }
+
+        meshCollidersStringBuilder.AppendLine();
+        meshCollidersStringBuilder.Append("mesh_collider_t* mesh_colliders[] = { ");
+        for (int meshColliderNum = 0; meshColliderNum < ds.meshColliders.Count; meshColliderNum++)
+        {
+            var meshCollider = ds.meshColliders[meshColliderNum];
+            if (meshCollider.sharedMesh == null)
+            {
+                continue;
+            }
+            meshCollidersStringBuilder.Append($"&mesh_collider_{meshColliderNum}, ");
+        }
+        meshCollidersStringBuilder.AppendLine("nullptr, };");
+
+        sb.AppendLine();
+        foreach (var vertices in all_vertices)
+        {
+            sb.AppendLine($"static float collision_mesh_vertices_{vertices.Value}[] = {{ {vertices.Key} }};");
+        }
+
+        sb.AppendLine();
+        foreach (var indices in all_indices)
+        {
+            sb.AppendLine($"static uint16_t collision_mesh_indices_{indices.Value}[] = {{ {indices.Key} }};");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine(meshCollidersStringBuilder.ToString());
+
+        File.WriteAllText("physics.cpp", sb.ToString());
+    }
+    static void ProcessCameras(DreamScene ds)
+    {
+
+        StringBuilder sb = new StringBuilder();
+
+        sb.AppendLine("#include <cstdint>");
+        sb.AppendLine("#include \"cameras.h\"");
+        
+        for (int cameraNum = 0; cameraNum < ds.cameras.Count; cameraNum++)
+        {
+            var camera = ds.cameras[cameraNum];
+            sb.Append($"camera_t camera_{cameraNum} = {{ ");
+            sb.Append($"nullptr, {camera.fieldOfView}, {camera.nearClipPlane}, {camera.farClipPlane}, ");
+            sb.AppendLine("};");
+        }
+
+        GenerateComponentArray(ds, sb, "camera", ds.cameras);
+
+        File.WriteAllText("cameras.cpp", sb.ToString());
+    }
+
+    static string typenameToVarname(string typename)
+    {
+        // convert from snake_case to camelCase
+        string[] parts = typename.Split('_');
+        for (int i = 1; i < parts.Length; i++)
+        {
+            parts[i] = char.ToUpper(parts[i][0]) + parts[i].Substring(1);
+        }
+        return string.Join("", parts);
+    }
+    private static void GenerateComponentDeclarations<T>(DreamScene ds, StringBuilder sb, string componentName, List<T> sceneComponents, Dictionary<T, int> componentIndex) where T:Component
+    {
+        for (int componentNum = 0; componentNum < sceneComponents.Count; componentNum++)
+        {
+            sb.AppendLine($"extern {componentName}_t {componentName}_{componentNum};");
+        }
+
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            var gameObject = ds.gameObjects[gameObjectNum];
+            var components = gameObject.GetComponents<T>();
+
+            if (components.Length != 0)
+            {
+                sb.Append($"static {componentName}_t* {componentName}s_{gameObjectNum}[] = {{ ");
+                for (int componentNum = 0; componentNum < components.Length; componentNum++)
+                {
+                    var component = components[componentNum];
+                    if (ds.rejectedComponents.Contains(component))
+                    {
+                        continue;
+                    }
+                    sb.Append($"&{componentName}_{componentIndex[component]}, ");
+                }
+                sb.AppendLine("nullptr, };");
+            }
+        }
+    }
+
+    private static void GenerateComponentArrays(DreamScene ds, StringBuilder sb)
+    {
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            var gameObject = ds.gameObjects[gameObjectNum];
+
+            List<string> components = new List<string>();
+
+            // components
+            if (gameObject.GetComponent<Animator>() != null) components.Add("animator");
+            if (gameObject.GetComponent<Camera>() != null) components.Add("camera");
+
+            // scripts
+            if (gameObject.GetComponent<ProximityInteractable>() != null) components.Add("proximity_interactable");
+            if (gameObject.GetComponent<gameobjectactiveinactive2>() != null) components.Add("game_object_activeinactive");
+            if (gameObject.GetComponent<timedactiveinactive>() != null) components.Add("timed_activeinactive");
+            if (gameObject.GetComponent<Fadein>() != null) components.Add("fadein");
+            if (gameObject.GetComponent<PlayerMovement2>() != null) components.Add("player_movement");
+            if (gameObject.GetComponent<MouseLook>() != null) components.Add("mouse_look");
+            if (gameObject.GetComponent<Interactable>() != null) components.Add("interactable");
+
+            // physics
+            if (gameObject.GetComponent<BoxCollider>() != null) components.Add("box_collider");
+            if (gameObject.GetComponent<SphereCollider>() != null) components.Add("sphere_collider");
+            if (gameObject.GetComponent<CapsuleCollider>() != null) components.Add("capsule_collider");
+            if (gameObject.GetComponent<MeshCollider>() != null) components.Add("mesh_collider");
+
+            sb.Append($"static component_t components_{gameObjectNum}[] = {{ ");
+            foreach(var component in components)
+            {
+                sb.Append($"ct_{component}, {{ .{typenameToVarname(component)}s = {component}s_{gameObjectNum} }} , ");
+            }
+            sb.AppendLine("ct_eol };");
+        }
+    }
+
+    private static void GenerateComponentArray<T>(DreamScene ds, StringBuilder sb, string componentName, List<T> components) where T : Component
+    {
+        sb.Append($"{componentName}_t* {componentName}s[] = {{ ");
+        for (int componentNum = 0; componentNum < components.Count; componentNum++)
+        {
+            sb.Append($"&{componentName}_{componentNum}, ");
+        }
+        sb.AppendLine("nullptr, };");
+
+        //sb.Append($"static size_t {componentName}_gameObjects[] = {{");
+        //for (int componentNum = 0; componentNum < components.Count; componentNum++)
+        //{
+        //    sb.Append($"{ds.gameObjectIndex[components[componentNum].gameObject]}, ");
+        //}
+        //sb.AppendLine("nullptr, };");
+    }
+
+    static string escapeCodeString(string v)
+    {
+        return $"\"{v.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r")}\"";
+    }
+    // scripts
+    static void ProcessScripts(DreamScene ds)
+    {
+        /////////////// proximity_interactable //////////////
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("#include <cstdint>");
+        sb.AppendLine("#include \"scripts.h\"");
+
+        for (int proximityInteractableNum = 0; proximityInteractableNum < ds.proximityInteractables.Count; proximityInteractableNum++)
+        {
+            var proximityInteractable = ds.proximityInteractables[proximityInteractableNum];
+            sb.Append($"proximity_interactable_t proximity_interactable_{proximityInteractableNum} = {{ ");
+
+            // TODO: this is a hack here, fix it
+            if (proximityInteractable.player == null)
+            {
+                sb.Append($"nullptr, {ds.gameObjectIndex[GameObject.Find("playa")]}, {proximityInteractable.radious}, {proximityInteractable.distsance}, {proximityInteractable.MultipleShot.ToString().ToLower()}, ");
+            }
+            else
+            {
+                sb.Append($"nullptr, {ds.gameObjectIndex[proximityInteractable.player.gameObject]}, {proximityInteractable.radious}, {proximityInteractable.distsance}, {proximityInteractable.MultipleShot.ToString().ToLower()}, ");
+            }
+            sb.AppendLine("};");
+        }
+
+        GenerateComponentArray(ds, sb, "proximity_interactable", ds.proximityInteractables);
+
+        ////////////// game_object_activeinactive //////////
+        for (int gameObjectActiveInactiveNum = 0; gameObjectActiveInactiveNum < ds.gameobjectactiveinactive2s.Count; gameObjectActiveInactiveNum++)
+        {
+            var gameObjectActiveInactive = ds.gameobjectactiveinactive2s[gameObjectActiveInactiveNum];
+            sb.Append($"game_object_activeinactive_t game_object_activeinactive_{gameObjectActiveInactiveNum} = {{ ");
+            string gameObjectIndex = gameObjectActiveInactive.GameObjectToToggle != null ? ds.gameObjectIndex[gameObjectActiveInactive.GameObjectToToggle].ToString() : "SIZE_MAX";
+            sb.Append($"nullptr, {gameObjectIndex}, \"{gameObjectActiveInactive.message}\", {gameObjectActiveInactive.SetTo.ToString().ToLower()}, ");
+            sb.AppendLine("};");
+        }
+
+        GenerateComponentArray(ds, sb, "game_object_activeinactive", ds.gameobjectactiveinactive2s);
+
+
+        /////////////// timed_activeinactive ///////////////
+        for (int timedActiveInactiveNum = 0; timedActiveInactiveNum < ds.timedactiveinactives.Count; timedActiveInactiveNum++)
+        {
+            var timedActiveInactive = ds.timedactiveinactives[timedActiveInactiveNum];
+            sb.Append($"timed_activeinactive_t timed_activeinactive_{timedActiveInactiveNum} = {{ ");
+            string gameObjectIndex = timedActiveInactive.GameObject != null ? ds.gameObjectIndex[timedActiveInactive.GameObject].ToString() : "SIZE_MAX";
+            sb.Append($"nullptr, {gameObjectIndex}, {timedActiveInactive.GetDelay()}, {timedActiveInactive.SetTo.ToString().ToLower()}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "timed_activeinactive", ds.timedactiveinactives);
+
+        /////////////// fadein ///////////////
+        for (int fadeinNum = 0; fadeinNum < ds.fadeins.Count; fadeinNum++)
+        {
+            var fadein = ds.fadeins[fadeinNum];
+            sb.Append($"fadein_t fadein_{fadeinNum} = {{ ");
+            sb.Append($"nullptr, {fadein.fadeInDuration}, {fadein.targetVolume2}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "fadein", ds.fadeins);
+
+        /////////////// player_movement ///////////////
+        for (int playerMovementNum = 0; playerMovementNum < ds.playerMovement2s.Count; playerMovementNum++)
+        {
+            var playerMovement = ds.playerMovement2s[playerMovementNum];
+            sb.Append($"player_movement_t player_movement_{playerMovementNum} = {{ ");
+            sb.Append($"nullptr, {playerMovement.speed}, {playerMovement.gravity}, {playerMovement.groundDistance}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "player_movement", ds.playerMovement2s);
+
+        /////////////// mouse_look ///////////////
+        for (int mouseLookNum = 0; mouseLookNum < ds.mouseLooks.Count; mouseLookNum++)
+        {
+            var mouseLook = ds.mouseLooks[mouseLookNum];
+            sb.Append($"mouse_look_t mouse_look_{mouseLookNum} = {{ ");
+            sb.Append($"nullptr, {ds.gameObjectIndex[mouseLook.playerBody.gameObject]}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "mouse_look", ds.mouseLooks);
+
+
+        /////////////// interactable ///////////////
+        for (int interactableNum = 0; interactableNum < ds.interactables.Count; interactableNum++)
+        {
+            var interactable = ds.interactables[interactableNum];
+            string message = "nullptr";
+            if (interactable.Message.Length != 0)
+            {
+                sb.AppendLine($"static const char* interactable_{interactableNum}_messages[] = {{ {string.Join(", ", interactable.Message.Select( x => escapeCodeString(x) ).ToArray())}, nullptr, }};");
+                message = $"interactable_{interactableNum}_messages";
+            }
+            sb.Append($"interactable_t interactable_{interactableNum} = {{ ");
+            sb.Append($"nullptr, {escapeCodeString(interactable.SpeakerName)}, {escapeCodeString(interactable.LookAtMessage)}, {message}, {interactable.InteractionRadious}, /* TODO: add more here */");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "interactable", ds.interactables);
+
+        File.WriteAllText("scripts.cpp", sb.ToString());
+    }
+
+    [MenuItem("Dreamcast/Export Components")]
+    public static void ProcessComponents()
+    {
+        DreamScene ds = CollectScene();
+
+        StringBuilder sb = new StringBuilder();
+
+        sb.AppendLine("#include \"components.h\"");
+        
+        // components
+        GenerateComponentDeclarations(ds, sb, "animator", ds.animators, ds.animatorIndex);
+        GenerateComponentDeclarations(ds, sb, "camera", ds.cameras, ds.cameraIndex);
+
+        // scripts
+        GenerateComponentDeclarations(ds, sb, "proximity_interactable", ds.proximityInteractables, ds.proximityInteractableIndex);
+        GenerateComponentDeclarations(ds, sb, "game_object_activeinactive", ds.gameobjectactiveinactive2s, ds.gameobjectactiveinactive2Index);
+        GenerateComponentDeclarations(ds, sb, "timed_activeinactive", ds.timedactiveinactives, ds.timedactiveinactiveIndex);
+        GenerateComponentDeclarations(ds, sb, "fadein", ds.fadeins, ds.fadeinIndex);
+        GenerateComponentDeclarations(ds, sb, "player_movement", ds.playerMovement2s, ds.playerMovement2Index);
+        GenerateComponentDeclarations(ds, sb, "mouse_look", ds.mouseLooks, ds.mouseLookIndex);
+        GenerateComponentDeclarations(ds, sb, "interactable", ds.interactables, ds.interactableIndex);
+
+        // physics
+
+        GenerateComponentDeclarations(ds, sb, "box_collider", ds.boxColliders, ds.boxColliderIndex);
+        GenerateComponentDeclarations(ds, sb, "sphere_collider", ds.sphereColliders, ds.sphereColliderIndex);
+        GenerateComponentDeclarations(ds, sb, "capsule_collider", ds.capsuleColliders, ds.capsuleColliderIndex);
+        GenerateComponentDeclarations(ds, sb, "mesh_collider", ds.meshColliders, ds.meshColliderIndex);
+
+        GenerateComponentArrays(ds, sb);
+
+        sb.Append("component_t* components[] = { ");
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            sb.Append($"components_{gameObjectNum}, ");
+        }
+        sb.AppendLine("};");
+
+        sb.AppendLine("void InitializeComponents(std::vector<game_object_t*> gameObjects) {");
+        sb.AppendLine(" for (size_t gameObjectNum = 0; gameObjectNum < gameObjects.size(); gameObjectNum++) {");
+        sb.AppendLine("  gameObjects[gameObjectNum]->components = components[gameObjectNum];");
+        sb.AppendLine("  component_t* currentComponentList = components[gameObjectNum];");
+        sb.AppendLine("  while (currentComponentList->componentType != ct_eol)");
+        sb.AppendLine("  {");
+        sb.AppendLine("      currentComponentList++;");
+        sb.AppendLine("      auto component = currentComponentList->components;");
+        sb.AppendLine("      do");
+        sb.AppendLine("      {");
+        sb.AppendLine("          (*component)->gameObject = gameObjects[gameObjectNum];");
+        sb.AppendLine("      } while (*++component);");
+        sb.AppendLine("      currentComponentList++;");
+        sb.AppendLine("  }");
+        sb.AppendLine(" }");
+        sb.AppendLine("}");
+
+        File.WriteAllText("components.cpp", sb.ToString());
+
+        ProcessAnimations(ds);
+        ProcessCameras(ds);
+
+        ProcessScripts(ds);
+
+        ProcessPhysics(ds);
+    }
     enum AnimationPropertyType
     {
         Float,
@@ -155,43 +654,93 @@ public class DreamExporter : MonoBehaviour
         sb.AppendLine("#include <vector>");
         sb.AppendLine("#include \"dcue/types-native.h\"");
         sb.AppendLine("using namespace native;");
-        sb.AppendLine("void InitializeHierarchy(std::vector<game_object_t*> gameObjects) {");
+        sb.AppendLine("");
+        
+        sb.AppendLine("static size_t parents[] = { ");
         for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
         {
             var gameObject = ds.gameObjects[gameObjectNum];
             if (gameObject.transform.parent != null)
             {
-                sb.AppendLine($" gameObjects[{gameObjectNum}]->parent = gameObjects[{ds.gameObjectIndex[gameObject.transform.parent.gameObject]}];");
+                sb.Append($"{ds.gameObjectIndex[gameObject.transform.parent.gameObject]}, ");
             }
-            var position = gameObject.transform.localPosition;
-            var rotation = gameObject.transform.localEulerAngles;
-            var scale = gameObject.transform.localScale;
-            sb.AppendLine($" gameObjects[{gameObjectNum}]->position = r_vector3_t{{{position.x}, {position.y}, {position.z}}};");
-            sb.AppendLine($" gameObjects[{gameObjectNum}]->rotation = r_vector3_t{{{rotation.x}, {rotation.y}, {rotation.z}}};");
-            sb.AppendLine($" gameObjects[{gameObjectNum}]->scale = r_vector3_t{{{scale.x}, {scale.y}, {scale.z}}};");
+            else
+            {
+                sb.Append("SIZE_MAX, ");
+            }
         }
+        sb.AppendLine("};");
+
+
+
+        sb.Append("static r_vector3_t initialPositions[] = { ");
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            var gameObject = ds.gameObjects[gameObjectNum];
+            var position = gameObject.transform.localPosition;
+            sb.Append($"{{{position.x}, {position.y}, {position.z}}}, ");
+        }
+        sb.AppendLine("};");
+        sb.Append("static r_vector3_t initialRotations[] = { ");
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            var gameObject = ds.gameObjects[gameObjectNum];
+            var rotation = gameObject.transform.localEulerAngles;
+            sb.Append($"{{{rotation.x}, {rotation.y}, {rotation.z}}}, ");
+        }
+        sb.AppendLine("};");
+        sb.Append("static r_vector3_t initialScales[] = { ");
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            var gameObject = ds.gameObjects[gameObjectNum];
+            var scale = gameObject.transform.localScale;
+            sb.Append($"{{{scale.x}, {scale.y}, {scale.z}}}, ");
+        }
+        sb.AppendLine("};");
+        sb.AppendLine("");
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            sb.Append($"static size_t children_{gameObjectNum}[] = {{ ");
+            var gameObject = ds.gameObjects[gameObjectNum];
+            for (int childNum = 0; childNum < gameObject.transform.childCount; childNum++)
+            {
+                sb.Append($"{ds.gameObjectIndex[gameObject.transform.GetChild(childNum).gameObject]}, ");
+            }
+            sb.Append("SIZE_MAX, ");
+            sb.AppendLine($"}}; //{gameObject.name}");
+        }
+        sb.Append($"static size_t* children[] = {{ ");
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            sb.Append($" children_{gameObjectNum}, ");
+        }
+        sb.AppendLine("};");
+        sb.AppendLine("");
+
+        sb.AppendLine("void InitializeHierarchy(std::vector<game_object_t*> gameObjects) {");
+        sb.AppendLine(" for (size_t gameObjectNum = 0; gameObjectNum < gameObjects.size(); gameObjectNum++) {");
+        sb.AppendLine("  if (parents[gameObjectNum] != SIZE_MAX) {");
+        sb.AppendLine("   gameObjects[gameObjectNum]->parent = gameObjects[parents[gameObjectNum]];");
+        sb.AppendLine("  }");
+        sb.AppendLine("  gameObjects[gameObjectNum]->children = children[gameObjectNum];");
+        sb.AppendLine("  gameObjects[gameObjectNum]->position = initialPositions[gameObjectNum];");
+        sb.AppendLine("  gameObjects[gameObjectNum]->rotation = initialRotations[gameObjectNum];");
+        sb.AppendLine("  gameObjects[gameObjectNum]->scale = initialScales[gameObjectNum];");
+        sb.AppendLine(" }");
         sb.AppendLine("}");
 
         File.WriteAllText("hierarchy.cpp", sb.ToString());
     }
 
-    [MenuItem("Dreamcast/Export Animations")]
-    public static void ProcessAnimations()
+    static void ProcessAnimations(DreamScene ds)
     {
-        DreamScene ds = CollectScene();
 
         StringBuilder sb = new StringBuilder();
 
-        sb.AppendLine("#include \"anim.h\"");
+        sb.AppendLine("#include \"animations.h\"");
         sb.AppendLine();
 
-        var rgo = SceneManager.GetActiveScene().GetRootGameObjects();
-
-        var animators = new List<Animator>();
-
-        foreach (var go in rgo) {
-            animators.AddRange(go.GetComponentsInChildren<Animator>(true));
-        }
+        var animators = ds.animators;
 
         var animationClips = new HashSet<AnimationClip>();
         var animatiorControllers = new HashSet<AnimatorController>();
@@ -213,8 +762,6 @@ public class DreamExporter : MonoBehaviour
                 animationClips.Add(animationClip);
             }
         }
-        Debug.Log("animationClips: " + animationClips.Count);
-        Debug.Log("animatiorControllers: " + animatiorControllers.Count);
 
         foreach (var animatorController in animatiorControllers)
         {
@@ -370,6 +917,7 @@ public class DreamExporter : MonoBehaviour
             var animatorController = animator.runtimeAnimatorController as AnimatorController;
             if (animatorController is null)
             {
+                sb.AppendLine($"animator_t animator_{animatorNum} = {{ nullptr, nullptr, 0, {ds.gameObjectIndex[animator.gameObject]} }};");
                 continue;
             }
 
@@ -437,7 +985,7 @@ public class DreamExporter : MonoBehaviour
             sb.AppendLine("};");
 
             sb.AppendLine();
-            sb.AppendLine($"static animator_t animator_{animatorNum} = {{ animator_{animatorNum}_bindlist, {animatorController.animationClips.Length} }};");
+            sb.AppendLine($"animator_t animator_{animatorNum} = {{ nullptr, animator_{animatorNum}_bindlist, {animatorController.animationClips.Length}, {ds.gameObjectIndex[animator.gameObject]} }};");
         }
 
         sb.AppendLine();
@@ -455,7 +1003,7 @@ public class DreamExporter : MonoBehaviour
         sb.AppendLine("};");
 
         // write all text to anim.cpp
-        File.WriteAllText("anim.cpp", sb.ToString());
+        File.WriteAllText("animations.cpp", sb.ToString());
     }
 
     static bool ArraysEqual<T>(T[] a1, T[] a2)
@@ -662,6 +1210,52 @@ public class DreamExporter : MonoBehaviour
         public Dictionary<DreamTerrainData, int> terrainIndex;
         public Dictionary<GameObject, int> gameObjectIndex;
 
+        public HashSet<Component> rejectedComponents = new HashSet<Component>();
+
+        // components
+        public List<Animator> animators;
+        public Dictionary<Animator, int> animatorIndex;
+
+        public List<Camera> cameras;
+        public Dictionary<Camera, int> cameraIndex;
+
+        // scripts
+        public List<ProximityInteractable> proximityInteractables;
+        public Dictionary<ProximityInteractable, int> proximityInteractableIndex;
+
+        public List<gameobjectactiveinactive2> gameobjectactiveinactive2s;
+        public Dictionary<gameobjectactiveinactive2, int> gameobjectactiveinactive2Index;
+
+        public List<timedactiveinactive> timedactiveinactives;
+        public Dictionary<timedactiveinactive, int> timedactiveinactiveIndex;
+
+        public List<Fadein> fadeins;
+        public Dictionary<Fadein, int> fadeinIndex;
+
+        public List<PlayerMovement2> playerMovement2s;
+        public Dictionary<PlayerMovement2, int> playerMovement2Index;
+
+        public List<MouseLook> mouseLooks;
+        public Dictionary<MouseLook, int> mouseLookIndex;
+
+        public List<Interactable> interactables;
+        public Dictionary<Interactable, int> interactableIndex;
+
+        // Physics
+        public List<Rigidbody> rigidbodies;
+        public Dictionary<Rigidbody, int> rigidbodyIndex;
+
+        public List<BoxCollider> boxColliders;
+        public Dictionary<BoxCollider, int> boxColliderIndex;
+
+        public List<SphereCollider> sphereColliders;
+        public Dictionary<SphereCollider, int> sphereColliderIndex;
+
+        public List<CapsuleCollider> capsuleColliders;
+        public Dictionary<CapsuleCollider, int> capsuleColliderIndex;
+
+        public List<MeshCollider> meshColliders;
+        public Dictionary<MeshCollider, int> meshColliderIndex;
     }
 
     static Texture2D GetReadableTexture(Texture source)
@@ -686,6 +1280,30 @@ public class DreamExporter : MonoBehaviour
         return readableTexture;
     }
 
+
+    static List<T> GetSceneComponents<T>() where T : Component
+    {
+        var rgo = SceneManager.GetActiveScene().GetRootGameObjects();
+
+        var components = new List<T>();
+
+        foreach (var go in rgo)
+        {
+            components.AddRange(go.GetComponentsInChildren<T>(true));
+        }
+
+        return components;
+    }
+
+    private static Dictionary<T, int> CreateComponentIndex<T>(List<T> components) where T : Component
+    {
+        var componentIndex = new Dictionary<T, int>();
+        for (int i = 0; i < components.Count; i++)
+        {
+            componentIndex[components[i]] = i;
+        }
+        return componentIndex;
+    }
 
     static DreamScene CollectScene()
     {
@@ -731,6 +1349,60 @@ public class DreamExporter : MonoBehaviour
         {
             ds.gameObjectIndex[ds.gameObjects[i]] = i;
         }
+
+        // components
+        ds.animators = GetSceneComponents<Animator>();
+        ds.animatorIndex = CreateComponentIndex(ds.animators);
+
+        ds.cameras = GetSceneComponents<Camera>();
+        ds.cameraIndex = CreateComponentIndex(ds.cameras);
+
+        // scripts
+        ds.proximityInteractables = GetSceneComponents<ProximityInteractable>();
+        ds.proximityInteractableIndex = CreateComponentIndex(ds.proximityInteractables);
+        
+        ds.gameobjectactiveinactive2s = GetSceneComponents<gameobjectactiveinactive2>();
+        ds.gameobjectactiveinactive2Index = CreateComponentIndex(ds.gameobjectactiveinactive2s);
+
+        ds.timedactiveinactives = GetSceneComponents<timedactiveinactive>();
+        ds.timedactiveinactiveIndex = CreateComponentIndex(ds.timedactiveinactives);
+
+        ds.fadeins = GetSceneComponents<Fadein>();
+        ds.fadeinIndex = CreateComponentIndex(ds.fadeins);
+
+        ds.playerMovement2s = GetSceneComponents<PlayerMovement2>();
+        ds.playerMovement2Index = CreateComponentIndex(ds.playerMovement2s);
+
+        ds.mouseLooks = GetSceneComponents<MouseLook>();
+        ds.mouseLookIndex = CreateComponentIndex(ds.mouseLooks);
+
+        ds.interactables = GetSceneComponents<Interactable>();
+        ds.interactableIndex = CreateComponentIndex(ds.interactables);
+
+        // Physics
+        ds.rigidbodies = GetSceneComponents<Rigidbody>();
+        ds.rigidbodyIndex = CreateComponentIndex(ds.rigidbodies);
+
+        ds.boxColliders = GetSceneComponents<BoxCollider>();
+        ds.boxColliderIndex = CreateComponentIndex(ds.boxColliders);
+
+        ds.sphereColliders = GetSceneComponents<SphereCollider>();
+        ds.sphereColliderIndex = CreateComponentIndex(ds.sphereColliders);
+
+        ds.capsuleColliders = GetSceneComponents<CapsuleCollider>();
+        ds.capsuleColliderIndex = CreateComponentIndex(ds.capsuleColliders);
+
+        var meshColliders = GetSceneComponents<MeshCollider>();
+        foreach(var mc in meshColliders.Where(mc => mc.sharedMesh == null))
+        {
+            if (mc.sharedMesh == null)
+            {
+                ds.rejectedComponents.Add(mc);
+            }
+        }
+        ds.meshColliders = meshColliders.Where(mc => mc.sharedMesh != null).ToList();
+        ds.meshColliderIndex = CreateComponentIndex(ds.meshColliders);
+
         return ds;
     }
 
