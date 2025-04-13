@@ -7,7 +7,7 @@ namespace native {
 }
 
 struct teleporter_t {
-    static constexpr component_type_t componentType = ct_mouse_look;
+    static constexpr component_type_t componentType = ct_teleporter;
     native::game_object_t* gameObject;
 
     size_t destinationIndex;

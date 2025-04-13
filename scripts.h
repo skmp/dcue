@@ -11,6 +11,7 @@
 #include "interactions/timed_activeinactive.h"
 #include "interactions/fadein.h"
 #include "interactions/show_message.h"
+#include "interactions/teleporter_trigger.h"
 
 // scripts
 extern proximity_interactable_t* proximity_interactables[];

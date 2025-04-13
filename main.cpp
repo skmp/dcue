@@ -2122,6 +2122,7 @@ extern "C" const char* getExecutableTag() {
 	return "tlj "  ":" ;
 }
 
+interactable_t* lookAtInteractable = nullptr;
 const char* lookAtMessage = nullptr;
 const char* messageSpeaker = nullptr;
 const char* messageText = nullptr;
@@ -2249,6 +2250,16 @@ void proximity_interactable_t::update(float deltaTime) {
 	}
 }
 
+void interactable_t::interact() {
+	// TODO: this is very partial
+	auto interactions = gameObject->getComponents<interaction_t>();
+	if (interactions) {
+		do {
+			(*interactions)->interact();
+		} while(*++interactions);
+	}
+}
+
 // interactions
 void game_object_activeinactive_t::interact() {
 	if (gameObjectToToggle != SIZE_MAX) {
@@ -2336,6 +2347,18 @@ void show_message_t::update(float deltaTime) {
 	}
 }
 
+void teleporter_trigger_t::interact() {
+	if (teleporterToTriggerIndex != SIZE_MAX) {
+		game_object_t* teleporterGameObject = gameObjects[teleporterToTriggerIndex];
+		if (auto teleporter = teleporterGameObject->getComponent<teleporter_t>()) {
+			teleporter->tryTeleport();
+			return;
+		}
+		// TODO: Also handle LevelLoader here
+	}
+}
+
+
 // TODO: manage well known objects in the scene better
 game_object_t* playa;
 
@@ -2386,15 +2409,25 @@ public:
 
 	void showMessage() {
 		lookAtMessage = nullptr;
+		lookAtInteractable = nullptr;
 		const char** newLookAtAction = nullptr;
-		if (collider) {
+		if (collider && playa) {
 			#if defined(DEBUG_LOOKAT)
 			pointedGameObject = collider->gameObject;
 			#endif
 			// std::cout << "Hit collider: " << collider << " gameObject " << collider->gameObject << std::endl;
+			float distance = sqrtf(
+				(playa->ltw.pos.x - collider->gameObject->ltw.pos.x) * (playa->ltw.pos.x - collider->gameObject->ltw.pos.x) +
+				(playa->ltw.pos.y - collider->gameObject->ltw.pos.y) * (playa->ltw.pos.y - collider->gameObject->ltw.pos.y) +
+				(playa->ltw.pos.z - collider->gameObject->ltw.pos.z) * (playa->ltw.pos.z - collider->gameObject->ltw.pos.z)
+			);
 
 			if (auto component = collider->gameObject->getComponents<interactable_t>()) {
 				do {
+					if ( (*component)->interactionRadius >= distance) {
+						break;
+					}
+					lookAtInteractable = (*component);
 					lookAtMessage = (*component)->lookAtMessage;
 					if ((*component)->messages) {
 						newLookAtAction = (*component)->messages;
@@ -2460,9 +2493,9 @@ void teleporter_t::tryTeleport() {
 
 	// (playa->position - gameobject->position)
 	auto distance  = sqrtf(
-		(playa->position.x - gameObject->position.x) * (playa->position.x - gameObject->position.x) +
-		(playa->position.y - gameObject->position.y) * (playa->position.y - gameObject->position.y) +
-		(playa->position.z - gameObject->position.z) * (playa->position.z - gameObject->position.z)
+		(playa->ltw.pos.x - gameObject->ltw.pos.x) * (playa->ltw.pos.x - gameObject->ltw.pos.x) +
+		(playa->ltw.pos.y - gameObject->ltw.pos.y) * (playa->ltw.pos.y - gameObject->ltw.pos.y) +
+		(playa->ltw.pos.z - gameObject->ltw.pos.z) * (playa->ltw.pos.z - gameObject->ltw.pos.z)
 	);
 
 	if (distance < radius) {
@@ -2477,9 +2510,14 @@ void teleporter_t::tryTeleport() {
 
 void teleporter_t::teleport() {
 	if (setPosition) {
-		playa->position = gameObjects[destinationIndex]->position;
+		playa->position = { 
+			gameObjects[destinationIndex]->ltw.pos.x,
+			gameObjects[destinationIndex]->ltw.pos.y,
+			gameObjects[destinationIndex]->ltw.pos.z
+		};
 	}
 	if (setRotation) {
+		// TODO this is wrong
 		playa->rotation = gameObjects[destinationIndex]->rotation;
 	}
 }
@@ -2906,6 +2944,12 @@ int main(int argc, const char** argv) {
 					}
 				}
 				last_b = state->b;
+
+				static bool last_x = false;
+				if (!last_x && state->x && lookAtInteractable) {
+					lookAtInteractable->interact();
+				}
+				last_x = state->x;
             }
         }
         

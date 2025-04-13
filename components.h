@@ -22,6 +22,7 @@ struct game_object_activeinactive_t;
 struct timed_activeinactive_t;
 struct fadein_t;
 struct show_message_t;
+struct teleporter_trigger_t;
 
 // interaction list
 struct interaction_t;
@@ -56,6 +57,7 @@ enum component_type_t {
     ct_timed_activeinactive,
     ct_fadein,
     ct_show_message,
+    ct_teleporter_trigger,
 
     ct_eol = -1
 };
@@ -85,6 +87,7 @@ struct component_t {
         timed_activeinactive_t** timedActiveinactives;
         fadein_t** fadeins;
         show_message_t** showMessages;
+        teleporter_trigger_t** teleporterTriggers;
 
         // interactions list
         interaction_t** interactions;

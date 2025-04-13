@@ -134,6 +134,15 @@ namespace native {
             }
             return nullptr;
         }
+
+        template<typename T>
+        T* getComponent() {
+            auto components = getComponents<T>();
+            if (components) {
+                return *components;
+            }
+            return nullptr;
+        }
     };
 
     struct MeshInfo {

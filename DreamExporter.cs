@@ -502,6 +502,7 @@ public class DreamExporter : MonoBehaviour
        { typeof(timedactiveinactive), "timed_activeinactive" },
        { typeof(Fadein), "fadein" },
        { typeof(ShowMessage), "show_message" },
+       { typeof(TeleporterTrigger), "teleporter_trigger" }
     };
 
     // scripts
@@ -658,7 +659,15 @@ public class DreamExporter : MonoBehaviour
         }
         GenerateComponentArray(ds, sb, "show_message", ds.showMessages);
 
-
+        /////////////// teleporter_trigger ///////////////
+        for (int teleporterTriggerNum = 0; teleporterTriggerNum < ds.teleporterTriggers.Count; teleporterTriggerNum++)
+        {
+            var teleporterTrigger = ds.teleporterTriggers[teleporterTriggerNum];
+            sb.Append($"teleporter_trigger_t teleporter_trigger_{teleporterTriggerNum} = {{ ");
+            sb.Append($"nullptr, {teleporterTrigger.Index}, {teleporterTrigger.blocking.ToString().ToLower()}, {ds.gameObjectIndex[teleporterTrigger.teleporterToTrigger]}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "teleporter_trigger", ds.teleporterTriggers);
 
         File.WriteAllText("scripts.cpp", sb.ToString());
     }
@@ -691,6 +700,7 @@ public class DreamExporter : MonoBehaviour
         GenerateComponentDeclarations(ds, sb, "timed_activeinactive", ds.timedactiveinactives, ds.timedactiveinactiveIndex, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "fadein", ds.fadeins, ds.fadeinIndex, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "show_message", ds.showMessages, ds.showMessageIndex, interactionsIndex);
+        GenerateComponentDeclarations(ds, sb, "teleporter_trigger", ds.teleporterTriggers, ds.teleporterTriggerIndex, interactionsIndex);
 
         // interaction lists
         GenerateInteractionDeclarations(ds, sb, interactionsIndex);
@@ -1518,6 +1528,9 @@ public class DreamExporter : MonoBehaviour
         public List<ShowMessage> showMessages;
         public Dictionary<ShowMessage, int> showMessageIndex;
 
+        public List<TeleporterTrigger> teleporterTriggers;
+        public Dictionary<TeleporterTrigger, int> teleporterTriggerIndex;
+
         // Physics
         public List<Rigidbody> rigidbodies;
         public Dictionary<Rigidbody, int> rigidbodyIndex;
@@ -1672,6 +1685,9 @@ public class DreamExporter : MonoBehaviour
 
         ds.showMessages = GetSceneComponents<ShowMessage>();
         ds.showMessageIndex = CreateComponentIndex(ds.showMessages);
+
+        ds.teleporterTriggers = GetSceneComponents<TeleporterTrigger>();
+        ds.teleporterTriggerIndex = CreateComponentIndex(ds.teleporterTriggers);
 
         // Physics
         ds.rigidbodies = GetSceneComponents<Rigidbody>();
