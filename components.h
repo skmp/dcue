@@ -5,7 +5,6 @@
 namespace native {
     struct game_object_t;
 }
-using namespace native;
 
 // components
 struct animator_t;
@@ -13,12 +12,17 @@ struct camera_t;
 
 // scripts
 struct proximity_interactable_t;
-struct game_object_activeinactive_t;
-struct timed_activeinactive_t;
-struct fadein_t;
 struct player_movement_t;
 struct mouse_look_t;
 struct interactable_t;
+
+// interactions
+struct game_object_activeinactive_t;
+struct timed_activeinactive_t;
+struct fadein_t;
+
+// interaction list
+struct interaction_t;
 
 // physics
 struct box_collider_t;
@@ -51,7 +55,7 @@ enum component_type_t {
 };
 
 struct component_base_t {
-    game_object_t* gameObject;
+    native::game_object_t* gameObject;
 };
 struct component_t {
     union {
@@ -65,12 +69,17 @@ struct component_t {
         // scripts
         camera_t** cameras;
         proximity_interactable_t** proximityInteractables;
-        game_object_activeinactive_t** gameObjectActiveinactives;
-        timed_activeinactive_t** timedActiveinactives;
-        fadein_t** fadeins;
         player_movement_t** playerMovements;
         mouse_look_t** mouseLooks;
         interactable_t** interactables;
+
+        // interactions
+        game_object_activeinactive_t** gameObjectActiveinactives;
+        timed_activeinactive_t** timedActiveinactives;
+        fadein_t** fadeins;
+
+        // interactions list
+        interaction_t** interactions;
 
         // physics
         box_collider_t** boxColliders;
@@ -80,7 +89,7 @@ struct component_t {
     };
 };
 
-void InitializeComponents(std::vector<game_object_t*> gameObjects);
+void InitializeComponents(std::vector<native::game_object_t*> gameObjects);
 
 // here to handle recusive include
 #include "dcue/types-native.h"

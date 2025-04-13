@@ -10,6 +10,7 @@ using mango;
 using System.Linq;
 using Ludiq;
 using UnityEngine.UI;
+using Pavo.Behaviors;
 
 public class DreamExporter : MonoBehaviour
 {
@@ -330,11 +331,20 @@ public class DreamExporter : MonoBehaviour
         }
         return string.Join("", parts);
     }
-    private static void GenerateComponentDeclarations<T>(DreamScene ds, StringBuilder sb, string componentName, List<T> sceneComponents, Dictionary<T, int> componentIndex) where T:Component
+    private static void GenerateComponentDeclarations<T>(DreamScene ds, StringBuilder sb, string componentName, List<T> sceneComponents, Dictionary<T, int> componentIndex, Dictionary<IInteraction, int> interactionsIndex = null) where T:Component
     {
         for (int componentNum = 0; componentNum < sceneComponents.Count; componentNum++)
         {
             sb.AppendLine($"extern {componentName}_t {componentName}_{componentNum};");
+            if (interactionsIndex != null)
+            {
+                var interaciton = sceneComponents[componentNum] as IInteraction;
+                if (interaciton == null)
+                {
+                    throw new Exception($"Component {componentName}_{componentNum} is not an IInteraction");
+                }
+                interactionsIndex[interaciton] = componentNum;
+            }
         }
 
         for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
@@ -358,6 +368,35 @@ public class DreamExporter : MonoBehaviour
             }
         }
     }
+    private static void GenerateInteractionDeclarations(DreamScene ds, StringBuilder sb, Dictionary<IInteraction, int> interactionsIndex)
+    {
+        for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
+        {
+            var gameObject = ds.gameObjects[gameObjectNum];
+            var components = gameObject.GetComponents<IInteraction>().Where(x => supportedInteractionTypes.ContainsKey(x.GetType())).ToArray();
+
+            bool sort = components.Any(x => x.Index != 0);
+            if (sort)
+            {
+                Array.Sort(components, delegate (IInteraction x, IInteraction y) { return x.Index.CompareTo(y.Index); });
+            }
+            if (components.Length != 0)
+            {
+                sb.Append($"static interaction_t* interactions_{gameObjectNum}[] = {{ ");
+                for (int componentNum = 0; componentNum < components.Length; componentNum++)
+                {
+                    var component = components[componentNum];
+                    if (ds.rejectedComponents.Contains(component))
+                    {
+                        continue;
+                    }
+                    
+                    sb.Append($"(interaction_t*)&{supportedInteractionTypes[component.GetType()]}_{interactionsIndex[component]}, ");
+                }
+                sb.AppendLine("nullptr, };");
+            }
+        }
+    }
 
     private static void GenerateComponentArrays(DreamScene ds, StringBuilder sb)
     {
@@ -373,12 +412,26 @@ public class DreamExporter : MonoBehaviour
 
             // scripts
             if (gameObject.GetComponent<ProximityInteractable>() != null) components.Add("proximity_interactable");
-            if (gameObject.GetComponent<gameobjectactiveinactive2>() != null) components.Add("game_object_activeinactive");
-            if (gameObject.GetComponent<timedactiveinactive>() != null) components.Add("timed_activeinactive");
-            if (gameObject.GetComponent<Fadein>() != null) components.Add("fadein");
             if (gameObject.GetComponent<PlayerMovement2>() != null) components.Add("player_movement");
             if (gameObject.GetComponent<MouseLook>() != null) components.Add("mouse_look");
             if (gameObject.GetComponent<Interactable>() != null) components.Add("interactable");
+
+            // interactions
+            bool hasInteractions = false;
+            foreach (var interactionType in supportedInteractionTypes.Keys)
+            {
+                if (gameObject.GetComponent(interactionType) != null)
+                {
+                    hasInteractions = true;
+                    components.Add(supportedInteractionTypes[interactionType]);
+                }
+            }
+
+            // interactions list
+            if (hasInteractions)
+            {
+                components.Add("interaction");
+            }
 
             // physics
             if (gameObject.GetComponent<BoxCollider>() != null) components.Add("box_collider");
@@ -416,9 +469,33 @@ public class DreamExporter : MonoBehaviour
     {
         return $"\"{v.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r")}\"";
     }
+
+    static Dictionary<Type, string> supportedInteractionTypes = new Dictionary<Type, string>() {
+       { typeof(gameobjectactiveinactive2), "game_object_activeinactive" },
+       { typeof(timedactiveinactive), "timed_activeinactive" },
+       { typeof(Fadein), "fadein" },
+    };
+
     // scripts
     static void ProcessScripts(DreamScene ds)
     {
+        //HashSet<Type> interactionTypes = new HashSet<Type>();
+        //var interactions = GetSceneComponents<IInteraction>();
+
+        //foreach (var interaction in interactions)
+        //{
+        //    if (interaction == null)
+        //    {
+        //        continue;
+        //    }
+        //    interactionTypes.Add(interaction.GetType());
+        //}
+
+        //foreach (var interactionType in interactionTypes)
+        //{
+        //    Debug.Log($"Found interaction type: {interactionType}");
+        //}
+
         /////////////// proximity_interactable //////////////
         StringBuilder sb = new StringBuilder();
         sb.AppendLine("#include <cstdint>");
@@ -442,40 +519,6 @@ public class DreamExporter : MonoBehaviour
         }
 
         GenerateComponentArray(ds, sb, "proximity_interactable", ds.proximityInteractables);
-
-        ////////////// game_object_activeinactive //////////
-        for (int gameObjectActiveInactiveNum = 0; gameObjectActiveInactiveNum < ds.gameobjectactiveinactive2s.Count; gameObjectActiveInactiveNum++)
-        {
-            var gameObjectActiveInactive = ds.gameobjectactiveinactive2s[gameObjectActiveInactiveNum];
-            sb.Append($"game_object_activeinactive_t game_object_activeinactive_{gameObjectActiveInactiveNum} = {{ ");
-            string gameObjectIndex = gameObjectActiveInactive.GameObjectToToggle != null ? ds.gameObjectIndex[gameObjectActiveInactive.GameObjectToToggle].ToString() : "SIZE_MAX";
-            sb.Append($"nullptr, {gameObjectIndex}, \"{gameObjectActiveInactive.message}\", {gameObjectActiveInactive.SetTo.ToString().ToLower()}, ");
-            sb.AppendLine("};");
-        }
-
-        GenerateComponentArray(ds, sb, "game_object_activeinactive", ds.gameobjectactiveinactive2s);
-
-
-        /////////////// timed_activeinactive ///////////////
-        for (int timedActiveInactiveNum = 0; timedActiveInactiveNum < ds.timedactiveinactives.Count; timedActiveInactiveNum++)
-        {
-            var timedActiveInactive = ds.timedactiveinactives[timedActiveInactiveNum];
-            sb.Append($"timed_activeinactive_t timed_activeinactive_{timedActiveInactiveNum} = {{ ");
-            string gameObjectIndex = timedActiveInactive.GameObject != null ? ds.gameObjectIndex[timedActiveInactive.GameObject].ToString() : "SIZE_MAX";
-            sb.Append($"nullptr, {gameObjectIndex}, {timedActiveInactive.GetDelay()}, {timedActiveInactive.SetTo.ToString().ToLower()}, ");
-            sb.AppendLine("};");
-        }
-        GenerateComponentArray(ds, sb, "timed_activeinactive", ds.timedactiveinactives);
-
-        /////////////// fadein ///////////////
-        for (int fadeinNum = 0; fadeinNum < ds.fadeins.Count; fadeinNum++)
-        {
-            var fadein = ds.fadeins[fadeinNum];
-            sb.Append($"fadein_t fadein_{fadeinNum} = {{ ");
-            sb.Append($"nullptr, {fadein.fadeInDuration}, {fadein.targetVolume2}, ");
-            sb.AppendLine("};");
-        }
-        GenerateComponentArray(ds, sb, "fadein", ds.fadeins);
 
         /////////////// player_movement ///////////////
         for (int playerMovementNum = 0; playerMovementNum < ds.playerMovement2s.Count; playerMovementNum++)
@@ -514,6 +557,47 @@ public class DreamExporter : MonoBehaviour
         }
         GenerateComponentArray(ds, sb, "interactable", ds.interactables);
 
+
+
+        //////////////
+        ////////////// INTERACTIONS ///////////////
+        //////////////
+
+        ////////////// game_object_activeinactive //////////
+        for (int gameObjectActiveInactiveNum = 0; gameObjectActiveInactiveNum < ds.gameobjectactiveinactive2s.Count; gameObjectActiveInactiveNum++)
+        {
+            var gameObjectActiveInactive = ds.gameobjectactiveinactive2s[gameObjectActiveInactiveNum];
+            sb.Append($"game_object_activeinactive_t game_object_activeinactive_{gameObjectActiveInactiveNum} = {{ ");
+            string gameObjectIndex = gameObjectActiveInactive.GameObjectToToggle != null ? ds.gameObjectIndex[gameObjectActiveInactive.GameObjectToToggle].ToString() : "SIZE_MAX";
+            sb.Append($"nullptr, {gameObjectIndex}, \"{gameObjectActiveInactive.message}\", {gameObjectActiveInactive.SetTo.ToString().ToLower()}, ");
+            sb.AppendLine("};");
+        }
+
+        GenerateComponentArray(ds, sb, "game_object_activeinactive", ds.gameobjectactiveinactive2s);
+
+
+        /////////////// timed_activeinactive ///////////////
+        for (int timedActiveInactiveNum = 0; timedActiveInactiveNum < ds.timedactiveinactives.Count; timedActiveInactiveNum++)
+        {
+            var timedActiveInactive = ds.timedactiveinactives[timedActiveInactiveNum];
+            sb.Append($"timed_activeinactive_t timed_activeinactive_{timedActiveInactiveNum} = {{ ");
+            string gameObjectIndex = timedActiveInactive.GameObject != null ? ds.gameObjectIndex[timedActiveInactive.GameObject].ToString() : "SIZE_MAX";
+            sb.Append($"nullptr, {gameObjectIndex}, {timedActiveInactive.GetDelay()}, {timedActiveInactive.SetTo.ToString().ToLower()}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "timed_activeinactive", ds.timedactiveinactives);
+
+        /////////////// fadein ///////////////
+        for (int fadeinNum = 0; fadeinNum < ds.fadeins.Count; fadeinNum++)
+        {
+            var fadein = ds.fadeins[fadeinNum];
+            sb.Append($"fadein_t fadein_{fadeinNum} = {{ ");
+            sb.Append($"nullptr, {fadein.fadeInDuration}, {fadein.targetVolume2}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "fadein", ds.fadeins);
+
+
         File.WriteAllText("scripts.cpp", sb.ToString());
     }
 
@@ -525,19 +609,26 @@ public class DreamExporter : MonoBehaviour
         StringBuilder sb = new StringBuilder();
 
         sb.AppendLine("#include \"components.h\"");
-        
+        sb.AppendLine("using namespace native;");
+
         // components
         GenerateComponentDeclarations(ds, sb, "animator", ds.animators, ds.animatorIndex);
         GenerateComponentDeclarations(ds, sb, "camera", ds.cameras, ds.cameraIndex);
 
         // scripts
         GenerateComponentDeclarations(ds, sb, "proximity_interactable", ds.proximityInteractables, ds.proximityInteractableIndex);
-        GenerateComponentDeclarations(ds, sb, "game_object_activeinactive", ds.gameobjectactiveinactive2s, ds.gameobjectactiveinactive2Index);
-        GenerateComponentDeclarations(ds, sb, "timed_activeinactive", ds.timedactiveinactives, ds.timedactiveinactiveIndex);
-        GenerateComponentDeclarations(ds, sb, "fadein", ds.fadeins, ds.fadeinIndex);
         GenerateComponentDeclarations(ds, sb, "player_movement", ds.playerMovement2s, ds.playerMovement2Index);
         GenerateComponentDeclarations(ds, sb, "mouse_look", ds.mouseLooks, ds.mouseLookIndex);
         GenerateComponentDeclarations(ds, sb, "interactable", ds.interactables, ds.interactableIndex);
+
+        // interactions
+        Dictionary<IInteraction, int> interactionsIndex = new Dictionary<IInteraction, int>();
+        GenerateComponentDeclarations(ds, sb, "game_object_activeinactive", ds.gameobjectactiveinactive2s, ds.gameobjectactiveinactive2Index, interactionsIndex);
+        GenerateComponentDeclarations(ds, sb, "timed_activeinactive", ds.timedactiveinactives, ds.timedactiveinactiveIndex, interactionsIndex);
+        GenerateComponentDeclarations(ds, sb, "fadein", ds.fadeins, ds.fadeinIndex, interactionsIndex);
+
+        // interaction lists
+        GenerateInteractionDeclarations(ds, sb, interactionsIndex);
 
         // physics
 

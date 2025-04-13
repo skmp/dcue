@@ -28,5 +28,5 @@ struct interaction_t {
     int index;
     bool blocking;
 
-    virtual void interact(game_object_t* parent, interactable_t* inetractable) = 0;
+    virtual void interact(native::game_object_t* parent, interactable_t* inetractable) = 0;
 };

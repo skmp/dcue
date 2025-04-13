@@ -1,11 +1,12 @@
 #pragma once
 #include "proximity_interactable.h"
-#include "game_object_activeinactive.h"
-#include "timed_activeinactive.h"
-#include "fadein.h"
 #include "player_movement.h"
 #include "mouse_look.h"
 #include "interactable.h"
+
+#include "interactions/game_object_activeinactive.h"
+#include "interactions/timed_activeinactive.h"
+#include "interactions/fadein.h"
 
 // scripts
 extern proximity_interactable_t* proximity_interactables[];
