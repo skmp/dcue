@@ -2122,6 +2122,15 @@ extern "C" const char* getExecutableTag() {
 	return "tlj "  ":" ;
 }
 
+void setGameObject(component_type_t type, component_base_t* component, native::game_object_t* gameObject) {
+    if (type >= ct_interaction) {
+        auto interaction = (interaction_t*)component;
+        interaction->gameObject = gameObject;
+    } else {
+        component->gameObject = gameObject;
+    }
+}
+
 void animator_t::update(float deltaTime) {
     currentTime += deltaTime;
     for (size_t i = 0; i < num_bound_animations; ++i) {
@@ -2219,7 +2228,7 @@ void proximity_interactable_t::update(float deltaTime) {
 	if (distance < radius && !hasTriggered) {
 		hasTriggered = true;
 		// fire all triggers
-		auto component = gameObject->getComponents<game_object_activeinactive_t>();
+		auto component = gameObject->getComponents<interaction_t>();
 
 		if (component) {
 			do {
@@ -2240,14 +2249,27 @@ void game_object_activeinactive_t::interact() {
 }
 
 void timed_activeinactive_t::update(float deltaTime) {
-	if (delay > 0) {
-		delay -= deltaTime;
-		if (delay <= 0) {
+	if (!triggered) {
+		return;
+	}
+	if (countDown > 0) {
+		countDown -= deltaTime;
+		if (countDown <= 0) {
 			if (gameObjectToToggle != SIZE_MAX) {
 				gameObjects[gameObjectToToggle]->setActive(setTo);
 			}
+			triggered = false;
 		}
 	}
+}
+
+void timed_activeinactive_t::interact() {
+	triggered = true;
+	countDown = delay;
+}
+
+void fadein_t::interact() {
+	// TODO
 }
 
 void player_movement_t::update(float deltaTime) {
@@ -2303,7 +2325,7 @@ public:
 			#if defined(DEBUG_LOOKAT)
 			pointedGameObject = collider->gameObject;
 			#endif
-			std::cout << "Hit collider: " << collider << " gameObject " << collider->gameObject << std::endl;
+			// std::cout << "Hit collider: " << collider << " gameObject " << collider->gameObject << std::endl;
 
 			if (auto component = collider->gameObject->getComponents<interactable_t>()) {
 				do {
@@ -2314,7 +2336,6 @@ public:
 					break;
 				} while (*++component);
 			}
-			printf("LookAtMsg: %p, %p\n", lookAtMessage, lookAtAction);
 		}
 	}
 };

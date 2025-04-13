@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cstddef>
 #include "components.h"
 
@@ -25,8 +27,13 @@ struct interactable_t {
 struct interaction_t {
     static constexpr component_type_t componentType = ct_interaction;
 
+    native::game_object_t* gameObject;
+
     int index;
     bool blocking;
 
-    virtual void interact(native::game_object_t* parent, interactable_t* inetractable) = 0;
+    virtual void interact() = 0;
+
+    constexpr interaction_t(native::game_object_t* owner, int index, bool blocking)
+        : gameObject(owner), index(index), blocking(blocking) {}
 };

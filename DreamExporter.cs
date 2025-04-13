@@ -391,7 +391,7 @@ public class DreamExporter : MonoBehaviour
                         continue;
                     }
                     
-                    sb.Append($"(interaction_t*)&{supportedInteractionTypes[component.GetType()]}_{interactionsIndex[component]}, ");
+                    sb.Append($"&{supportedInteractionTypes[component.GetType()]}_{interactionsIndex[component]}, ");
                 }
                 sb.AppendLine("nullptr, };");
             }
@@ -569,7 +569,7 @@ public class DreamExporter : MonoBehaviour
             var gameObjectActiveInactive = ds.gameobjectactiveinactive2s[gameObjectActiveInactiveNum];
             sb.Append($"game_object_activeinactive_t game_object_activeinactive_{gameObjectActiveInactiveNum} = {{ ");
             string gameObjectIndex = gameObjectActiveInactive.GameObjectToToggle != null ? ds.gameObjectIndex[gameObjectActiveInactive.GameObjectToToggle].ToString() : "SIZE_MAX";
-            sb.Append($"nullptr, {gameObjectIndex}, \"{gameObjectActiveInactive.message}\", {gameObjectActiveInactive.SetTo.ToString().ToLower()}, ");
+            sb.Append($"nullptr, {gameObjectActiveInactive.Index}, {gameObjectActiveInactive.blocking.ToString().ToLower()}, {gameObjectIndex}, \"{gameObjectActiveInactive.message}\", {gameObjectActiveInactive.SetTo.ToString().ToLower()}, ");
             sb.AppendLine("};");
         }
 
@@ -582,7 +582,7 @@ public class DreamExporter : MonoBehaviour
             var timedActiveInactive = ds.timedactiveinactives[timedActiveInactiveNum];
             sb.Append($"timed_activeinactive_t timed_activeinactive_{timedActiveInactiveNum} = {{ ");
             string gameObjectIndex = timedActiveInactive.GameObject != null ? ds.gameObjectIndex[timedActiveInactive.GameObject].ToString() : "SIZE_MAX";
-            sb.Append($"nullptr, {gameObjectIndex}, {timedActiveInactive.GetDelay()}, {timedActiveInactive.SetTo.ToString().ToLower()}, ");
+            sb.Append($"nullptr, {timedActiveInactive.Index}, {timedActiveInactive.blocking.ToString().ToLower()}, {gameObjectIndex}, {timedActiveInactive.GetDelay()}, {timedActiveInactive.SetTo.ToString().ToLower()}, ");
             sb.AppendLine("};");
         }
         GenerateComponentArray(ds, sb, "timed_activeinactive", ds.timedactiveinactives);
@@ -592,7 +592,7 @@ public class DreamExporter : MonoBehaviour
         {
             var fadein = ds.fadeins[fadeinNum];
             sb.Append($"fadein_t fadein_{fadeinNum} = {{ ");
-            sb.Append($"nullptr, {fadein.fadeInDuration}, {fadein.targetVolume2}, ");
+            sb.Append($"nullptr, {fadein.Index}, {fadein.blocking.ToString().ToLower()}, {fadein.fadeInDuration}, {fadein.targetVolume2}, ");
             sb.AppendLine("};");
         }
         GenerateComponentArray(ds, sb, "fadein", ds.fadeins);
@@ -609,6 +609,7 @@ public class DreamExporter : MonoBehaviour
         StringBuilder sb = new StringBuilder();
 
         sb.AppendLine("#include \"components.h\"");
+        sb.AppendLine("#include \"scripts.h\"");
         sb.AppendLine("using namespace native;");
 
         // components
@@ -652,11 +653,12 @@ public class DreamExporter : MonoBehaviour
         sb.AppendLine("  component_t* currentComponentList = components[gameObjectNum];");
         sb.AppendLine("  while (currentComponentList->componentType != ct_eol)");
         sb.AppendLine("  {");
+        sb.AppendLine("      auto componentType = currentComponentList->componentType;");
         sb.AppendLine("      currentComponentList++;");
         sb.AppendLine("      auto component = currentComponentList->components;");
         sb.AppendLine("      do");
         sb.AppendLine("      {");
-        sb.AppendLine("          (*component)->gameObject = gameObjects[gameObjectNum];");
+        sb.AppendLine("          setGameObject(componentType, *component, gameObjects[gameObjectNum]);");
         sb.AppendLine("      } while (*++component);");
         sb.AppendLine("      currentComponentList++;");
         sb.AppendLine("  }");

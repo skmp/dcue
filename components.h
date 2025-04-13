@@ -37,19 +37,21 @@ enum component_type_t {
 
     // scripts
     ct_proximity_interactable,
-    ct_game_object_activeinactive,
-    ct_timed_activeinactive,
-    ct_fadein,
     ct_player_movement,
     ct_mouse_look,
     ct_interactable,
-    ct_interaction,
-    
+
     // physics
     ct_box_collider,
     ct_sphere_collider,
     ct_capsule_collider,
     ct_mesh_collider,
+
+    // interactions
+    ct_interaction = 10000,
+    ct_game_object_activeinactive,
+    ct_timed_activeinactive,
+    ct_fadein,
 
     ct_eol = -1
 };
@@ -88,6 +90,8 @@ struct component_t {
         mesh_collider_t** meshColliders;
     };
 };
+
+void setGameObject(component_type_t type, component_base_t* component, native::game_object_t* gameObject);
 
 void InitializeComponents(std::vector<native::game_object_t*> gameObjects);
 
