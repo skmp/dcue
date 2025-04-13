@@ -1,8 +1,8 @@
 #pragma once
-#include "proximity_interactable.h"
-#include "player_movement.h"
-#include "mouse_look.h"
-#include "interactable.h"
+#include "scripts/proximity_interactable.h"
+#include "scripts/player_movement.h"
+#include "scripts/mouse_look.h"
+#include "scripts/interactable.h"
 
 #include "interactions/game_object_activeinactive.h"
 #include "interactions/timed_activeinactive.h"

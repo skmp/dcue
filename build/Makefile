@@ -67,7 +67,7 @@ $(warning "KOS_BASE is not set. Only prebuilt targets will work.")
 endif
 
 %.o: %.cpp
-	kos-c++ $(CXXFLAGS) $(CPPFLAGS) $(RP3D_INCLUDE_DIRS) -DDC_SH4=1 -c $< -o $@
+	kos-c++ $(CXXFLAGS) $(CPPFLAGS) $(RP3D_INCLUDE_DIRS) -I../ -DDC_SH4=1 -c $< -o $@
 
 $(TARGET): $(OBJS)
 	kos-c++ -o $(TARGET) $(OBJS) -Wl,--gc-sections -Wl,--as-needed -Wl,-Map,output.map
