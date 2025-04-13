@@ -2336,7 +2336,12 @@ void show_message_t::update(float deltaTime) {
 	}
 }
 
+// TODO: manage well known objects in the scene better
+game_object_t* playa;
+
 void player_movement_t::update(float deltaTime) {
+	playa = gameObject;
+
 	if (!canMove) {
 		return;
 	}
@@ -2437,6 +2442,46 @@ void mouse_look_t::update(float deltaTime) {
 	physicsWorld->raycast(ray, &dumper);
 
 	dumper.showMessage();
+}
+
+
+void teleporter_t::update(float deltaTime) {
+	if (!requiresTrigger) {
+		tryTeleport();	
+	}
+	// TODO: fluctuate FOV
+	// TODO: Fade
+}
+
+void teleporter_t::tryTeleport() {
+	if (!playa || destinationIndex == SIZE_MAX) {
+		return;
+	}
+
+	// (playa->position - gameobject->position)
+	auto distance  = sqrtf(
+		(playa->position.x - gameObject->position.x) * (playa->position.x - gameObject->position.x) +
+		(playa->position.y - gameObject->position.y) * (playa->position.y - gameObject->position.y) +
+		(playa->position.z - gameObject->position.z) * (playa->position.z - gameObject->position.z)
+	);
+
+	if (distance < radius) {
+		if (requiresItem) {
+			// TODO: pavo invetory check
+		}
+		// TODO: fluctuate FOV
+		// TODO: Fade
+		teleport();
+	}
+}
+
+void teleporter_t::teleport() {
+	if (setPosition) {
+		playa->position = gameObjects[destinationIndex]->position;
+	}
+	if (setRotation) {
+		playa->rotation = gameObjects[destinationIndex]->rotation;
+	}
 }
 
 V3d ComputeAxisAlignedScale(const r_matrix_t* mtx) {
@@ -2891,6 +2936,11 @@ int main(int argc, const char** argv) {
 		for (auto mouse_look = mouse_looks; *mouse_look; mouse_look++) {
 			if ((*mouse_look)->gameObject->isActive()) {
 				(*mouse_look)->update(deltaTime);
+			}
+		}
+		for (auto teleporter = teleporters; *teleporter; teleporter++) {
+			if ((*teleporter)->gameObject->isActive()) {
+				(*teleporter)->update(deltaTime);
 			}
 		}
 

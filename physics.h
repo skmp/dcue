@@ -79,7 +79,7 @@ struct mesh_collider_t {
     void update(float deltaTime);
 };
 
-// scripts
+// physics
 extern box_collider_t* box_colliders[];
 extern sphere_collider_t* sphere_colliders[];
 extern capsule_collider_t* capsule_colliders[];

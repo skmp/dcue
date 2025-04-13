@@ -4,6 +4,7 @@
 #include "scripts/player_movement.h"
 #include "scripts/mouse_look.h"
 #include "scripts/interactable.h"
+#include "scripts/teleporter.h"
 
 // interactions
 #include "interactions/game_object_activeinactive.h"
@@ -16,6 +17,7 @@ extern proximity_interactable_t* proximity_interactables[];
 extern player_movement_t* player_movements[];
 extern mouse_look_t* mouse_looks[];
 extern interactable_t* interactables[];
+extern teleporter_t* teleporters[];
 
 // interactions
 extern game_object_activeinactive_t* game_object_activeinactives[];

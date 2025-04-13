@@ -15,6 +15,7 @@ struct proximity_interactable_t;
 struct player_movement_t;
 struct mouse_look_t;
 struct interactable_t;
+struct teleporter_t;
 
 // interactions
 struct game_object_activeinactive_t;
@@ -41,6 +42,7 @@ enum component_type_t {
     ct_player_movement,
     ct_mouse_look,
     ct_interactable,
+    ct_teleporter,
 
     // physics
     ct_box_collider,
@@ -76,6 +78,7 @@ struct component_t {
         player_movement_t** playerMovements;
         mouse_look_t** mouseLooks;
         interactable_t** interactables;
+        teleporter_t** teleporters;
 
         // interactions
         game_object_activeinactive_t** gameObjectActiveinactives;

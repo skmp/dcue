@@ -416,6 +416,7 @@ public class DreamExporter : MonoBehaviour
             if (gameObject.GetComponent<PlayerMovement2>() != null) components.Add("player_movement");
             if (gameObject.GetComponent<MouseLook>() != null) components.Add("mouse_look");
             if (gameObject.GetComponent<Interactable>() != null) components.Add("interactable");
+            if (gameObject.GetComponent<Telepotrter>() != null) components.Add("teleporter");
 
             // interactions
             bool hasInteractions = false;
@@ -480,6 +481,18 @@ public class DreamExporter : MonoBehaviour
         else
         {
             return escapeCodeString(v);
+        }
+    }
+
+    static string bools(bool v)
+    {
+        if (v)
+        {
+            return "true";
+        }
+        else
+        {
+            return "false";
         }
     }
 
@@ -572,6 +585,18 @@ public class DreamExporter : MonoBehaviour
         }
         GenerateComponentArray(ds, sb, "interactable", ds.interactables);
 
+        /////////////// teleporter ///////////////
+        for (int teleporterNum = 0; teleporterNum < ds.teleporters.Count; teleporterNum++)
+        {
+            var teleporter = ds.teleporters[teleporterNum];
+            sb.Append($"teleporter_t teleporter_{teleporterNum} = {{ ");
+            sb.Append($"nullptr, {(teleporter.destination == null ? "SIZE_MAX" : ds.gameObjectIndex[teleporter.destination].ToString())}, {teleporter.radious}, {escapeCodeStringOrNull(teleporter.requiresItem)}, {bools(teleporter.requiresTrigger)}, ");
+            sb.Append($"{bools(teleporter.removeAfterUnlock)}, {bools(teleporter.setPosition)}, {bools(teleporter.setRotation)}, ");
+            sb.Append($"{bools(teleporter.Fade)}, {{ {teleporter.FadeColor.a}, {teleporter.FadeColor.r}, {teleporter.FadeColor.g}, {teleporter.FadeColor.b}  }}, {teleporter.FadeInDuration}, {teleporter.FadeOutDuration}, ");
+            // TODO: doFluctuateFOV, scd
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "teleporter", ds.teleporters);
 
 
         //////////////
@@ -658,6 +683,7 @@ public class DreamExporter : MonoBehaviour
         GenerateComponentDeclarations(ds, sb, "player_movement", ds.playerMovement2s, ds.playerMovement2Index);
         GenerateComponentDeclarations(ds, sb, "mouse_look", ds.mouseLooks, ds.mouseLookIndex);
         GenerateComponentDeclarations(ds, sb, "interactable", ds.interactables, ds.interactableIndex);
+        GenerateComponentDeclarations(ds, sb, "teleporter", ds.teleporters, ds.teleporterIndex);
 
         // interactions
         Dictionary<IInteraction, int> interactionsIndex = new Dictionary<IInteraction, int>();
@@ -1476,6 +1502,9 @@ public class DreamExporter : MonoBehaviour
         public List<Interactable> interactables;
         public Dictionary<Interactable, int> interactableIndex;
 
+        public List<Telepotrter> teleporters;
+        public Dictionary<Telepotrter, int> teleporterIndex;
+
         // interactions
         public List<gameobjectactiveinactive2> gameobjectactiveinactive2s;
         public Dictionary<gameobjectactiveinactive2, int> gameobjectactiveinactive2Index;
@@ -1627,6 +1656,9 @@ public class DreamExporter : MonoBehaviour
 
         ds.playerMovement2s = GetSceneComponents<PlayerMovement2>();
         ds.playerMovement2Index = CreateComponentIndex(ds.playerMovement2s);
+
+        ds.teleporters = GetSceneComponents<Telepotrter>();
+        ds.teleporterIndex = CreateComponentIndex(ds.teleporters);
 
         // interactions
         ds.gameobjectactiveinactive2s = GetSceneComponents<gameobjectactiveinactive2>();
