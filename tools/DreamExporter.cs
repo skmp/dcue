@@ -10,6 +10,7 @@ using mango;
 using System.Linq;
 using UnityEngine.UI;
 using Bolt;
+using Pavo.Behaviors;
 
 namespace PseudoPavo
 {
@@ -119,9 +120,6 @@ public class DreamExporter : MonoBehaviour
         sb.AppendLine("#include \"pavo/pavo_interactable.h\"");
         sb.AppendLine("#include \"pavo/pavo_units.h\"");
 
-        Debug.Log(ds.flowMachines.Count + " flow machines found");
-
-        HashSet<Type> unitTypes = new HashSet<Type>();
         Dictionary<Bolt.IUnit, int> unitIndex = new Dictionary<Bolt.IUnit, int>();
         Dictionary<Bolt.IUnit, string> unitDesc = new Dictionary<Bolt.IUnit, string>();
         Dictionary<Bolt.IUnit, Bolt.IUnit> resovePseudo = new Dictionary<Bolt.IUnit, Bolt.IUnit>();
@@ -217,6 +215,8 @@ public class DreamExporter : MonoBehaviour
             }
         }
 
+        List<IUnit> initializeWaitFor = new List<IUnit> { };
+
         for (int flowMachineNum = 0; flowMachineNum < ds.flowMachines.Count; flowMachineNum++)
         {
             var flowMachine = ds.flowMachines[flowMachineNum];
@@ -237,8 +237,13 @@ public class DreamExporter : MonoBehaviour
 
 
                     sb.Append($"pavo_unit_wait_for_interaction_t pavo_unit_wait_for_interaction_{unitDeclIndex} = {{ ");
-                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, waitInteraction.OnInteract)}, {unitDesc.GetOrNullUnit(resovePseudo, waitInteraction.OnFocus)}, &pavo_interactable_{flowMachineNum}, {bools(waitInteraction.Initial)}, {escapeCodeStringOrNull(GetStaticValueInput<string>(waitInteraction.LookAtText, null))}, {waitInteraction.Radious?? 10} ");
+                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, waitInteraction.OnInteract)}, {unitDesc.GetOrNullUnit(resovePseudo, waitInteraction.OnFocus)}, &pavo_interactable_{flowMachineNum}, {escapeCodeStringOrNull(GetStaticValueInput<string>(waitInteraction.LookAtText, null))}, {waitInteraction.Radious?? 10} ");
                     sb.AppendLine("};");
+
+                    if (waitInteraction.Initial)
+                    {
+                        initializeWaitFor.Add(waitInteraction);
+                    }
                 }
                 else if (unit.GetType() == typeof(Pavo.ShowMessage))
                 {
@@ -316,12 +321,16 @@ public class DreamExporter : MonoBehaviour
             }
         }
 
-        foreach(var type in unitTypes)
+        sb.AppendLine("void InitializeFlowMachines() {");
+        foreach(var waitFor in initializeWaitFor)
         {
-            Debug.Log("Found unit type: " + type);
+            sb.AppendLine($" {unitDesc[waitFor]}.initialize();");
         }
+        sb.AppendLine("}");
 
         File.WriteAllText("flowmachines.cpp", sb.ToString());
+
+        Debug.Log("Generated flowmachines.cpp");
     }
     [MenuItem("Dreamcast/Export Fonts")]
     public static void ProcessFonts()
@@ -813,6 +822,7 @@ public class DreamExporter : MonoBehaviour
        { typeof(ShowMessage), "show_message" },
        { typeof(TeleporterTrigger), "teleporter_trigger" },
        { typeof(zoomout), "zoom_in_out" },
+       { typeof(CantMove), "cant_move" },
     };
 
     // scripts
@@ -1001,6 +1011,18 @@ public class DreamExporter : MonoBehaviour
         }
         GenerateComponentArray(ds, sb, "pavo_interactable", ds.flowMachines);
 
+        /////////////// cant_move ///////////////////
+        
+        for (int cantMoveNum = 0; cantMoveNum < ds.cantmoves.Count; cantMoveNum++)
+        {
+            var cantMove = ds.cantmoves[cantMoveNum];
+            sb.Append($"cant_move_t cant_move_{cantMoveNum} = {{");
+            sb.Append($"nullptr, {cantMove.Index}, {cantMove.blocking.ToString().ToLower()}, ");
+            sb.Append($"{bools(cantMove.CanMove)}, {bools(cantMove.CanRotate)}, {bools(cantMove.CanLook)}, {cantMove.delay}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "cant_move", ds.cantmoves);
+
         File.WriteAllText("scripts.cpp", sb.ToString());
     }
 
@@ -1035,6 +1057,7 @@ public class DreamExporter : MonoBehaviour
         GenerateComponentDeclarations(ds, sb, "show_message", ds.showMessages, ds.showMessageIndex, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "teleporter_trigger", ds.teleporterTriggers, ds.teleporterTriggerIndex, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "zoom_in_out", ds.zoomouts, ds.zoomoutIndex, interactionsIndex);
+        GenerateComponentDeclarations(ds, sb, "cant_move", ds.cantmoves, ds.cantmoveIndex, interactionsIndex);
 
         // interaction lists
         GenerateInteractionDeclarations(ds, sb, interactionsIndex);
@@ -1868,6 +1891,9 @@ public class DreamExporter : MonoBehaviour
         public List<zoomout> zoomouts;
         public Dictionary<zoomout, int> zoomoutIndex;
 
+        public List<CantMove> cantmoves;
+        public Dictionary<CantMove, int> cantmoveIndex;
+
         // FlowMachines
         public List<Bolt.FlowMachine> flowMachines;
         public Dictionary<Bolt.FlowMachine, int> flowMachineIndex;
@@ -2033,6 +2059,9 @@ public class DreamExporter : MonoBehaviour
 
         ds.zoomouts = GetSceneComponents<zoomout>();
         ds.zoomoutIndex = CreateComponentIndex(ds.zoomouts);
+
+        ds.cantmoves = GetSceneComponents<CantMove>();
+        ds.cantmoveIndex = CreateComponentIndex(ds.cantmoves);
 
         // FlowMachines
         ds.flowMachines = GetSceneComponents<Bolt.FlowMachine>();

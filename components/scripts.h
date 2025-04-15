@@ -14,6 +14,7 @@
 #include "interactions/show_message.h"
 #include "interactions/teleporter_trigger.h"
 #include "interactions/zoom_in_out.h"
+#include "interactions/cant_move.h"
 
 // scripts
 extern proximity_interactable_t* proximity_interactables[];

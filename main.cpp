@@ -2476,6 +2476,19 @@ void zoom_in_out_t::interact() {
 	queueCoroutine(this->doAnimation());
 }
 
+Task cant_move_t::delayDeactivate(float delay) {
+	std::shared_ptr<pavo_flat_game_env_t> oldState;
+
+	//State.PushState(new GameEnv(canMove: CanMove, canRotate: CanRotate, canLook: CanLook), ref oldState); 
+	pavo_state_t::pushEnv({.canMove = canMove, .canRotate = canRotate, .canLook = canLook}, &oldState);
+	co_yield WaitTime(delay);
+	pavo_state_t::popEnv(&oldState);
+}
+
+void cant_move_t::interact() {
+	queueCoroutine(this->delayDeactivate(delay));
+}
+
 
 // TODO: manage well known objects in the scene better
 game_object_t* playa;

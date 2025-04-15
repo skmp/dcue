@@ -56,7 +56,7 @@ struct pavo_game_env_t {
     std::optional<bool> canMove;
     std::optional<bool> canRotate;
     std::optional<bool> canLook;
-    pavo_interaction_delegate_t onInteraction;
+    pavo_interaction_delegate_t onInteraction = nullptr;
     std::optional<bool> cursorVisible;
     std::optional<pavo_game_mode_t> gameMode;
 };

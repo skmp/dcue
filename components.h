@@ -27,7 +27,7 @@ GameObjectActiveInactive
 ObjectDispenser
 - timedactiveinactive
 - Fadein
-CantMove
+- CantMove
 Fadeout
 - TeleporterTrigger
 - zoomout
@@ -38,6 +38,7 @@ struct fadein_t;
 struct show_message_t;
 struct teleporter_trigger_t;
 struct zoom_in_out_t;
+struct cant_move_t;
 
 // interaction list
 struct interaction_t;
@@ -75,6 +76,7 @@ enum component_type_t {
     ct_show_message,
     ct_teleporter_trigger,
     ct_zoom_in_out,
+    ct_cant_move,
 
     ct_eol = -1
 };
@@ -107,6 +109,7 @@ struct component_t {
         show_message_t** showMessages;
         teleporter_trigger_t** teleporterTriggers;
         zoom_in_out_t** zoomInOuts;
+        cant_move_t** cantMoves;
 
         // interactions list
         interaction_t** interactions;
