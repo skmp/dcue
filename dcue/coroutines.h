@@ -9,6 +9,14 @@ extern float timeDeltaTime;
 // An atomic yield value representing one frame step.
 enum class Step { Frame };
 
+struct conditional_awaiter {
+    bool should_suspend;
+
+    bool await_ready() const { return !should_suspend; }
+    void await_suspend(std::coroutine_handle<>) { /* Optionally do something here */ }
+    void await_resume() {}
+};
+
 // Forward declaration of Task.
 struct Task;
 
@@ -35,11 +43,14 @@ struct Task {
             return {};
         }
         // Overload for yielding a nested Task.
-        std::suspend_always yield_value(Task t) {
+        conditional_awaiter yield_value(Task t) {
             t.next();
+            if (t.done()) {
+                return { false };
+            }
             // Wrap the nested task in a unique_ptr so that we can hold it in our variant.
             currentValue = std::make_unique<Task>(std::move(t));
-            return {};
+            return { true };
         }
         void return_void() {}
         void unhandled_exception() { std::terminate(); }
@@ -66,7 +77,12 @@ struct Task {
                 // Drive the nested task one frame.
                 nestedPtr->next();
                 // Return control so that we advance one frame.
-                return;
+
+                if (!nestedPtr->done()) {
+                    return;
+                } else {
+                    break;
+                }
             } else {
                 break;
             }

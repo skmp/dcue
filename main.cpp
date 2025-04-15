@@ -2537,6 +2537,21 @@ public:
 	}
 };
 
+template<float maxDistance>
+struct GroundRaycastCallback: public reactphysics3d::RaycastCallback {
+	float distance;
+
+	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
+		auto collider = (box_collider_t*)raycastInfo.collider->getUserData();
+		if (collider->gameObject->isActive()) {
+			distance = raycastInfo.hitFraction * maxDistance;
+			return raycastInfo.hitFraction;
+		} else {
+			return -1;
+		}
+	}
+};
+
 void mouse_look_t::update(float deltaTime) {
 	auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
 	if (!contMaple) {
@@ -2568,6 +2583,21 @@ void mouse_look_t::update(float deltaTime) {
 	physicsWorld->raycast(ray, &dumper);
 
 	dumper.showMessage();
+
+	// TODO: move to correct place
+	if (playa) {
+		GroundRaycastCallback<10.f> groundCheck;
+		
+		reactphysics3d::Vector3 playaPos = {playa->ltw.pos.x, playa->ltw.pos.y, playa->ltw.pos.z};
+		reactphysics3d::Vector3 downAt = { 0, -1, 0 };
+
+		reactphysics3d::Ray ray(playaPos, playaPos + downAt*10);
+
+		physicsWorld->raycast(ray, &groundCheck);
+		playa->position.y -= groundCheck.distance - 0.5f - 3.8f/2; // TODO: the 3.8f should come from the character controller
+	}
+
+
 }
 
 
