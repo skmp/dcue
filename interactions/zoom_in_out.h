@@ -4,6 +4,7 @@
 
 #include "dcue/types-native.h"
 #include "reactphysics3d/reactphysics3d.h"
+#include "dcue/coroutines.h"
 
 struct zoom_in_out_t: interaction_t {
     static constexpr component_type_t componentType = ct_zoom_in_out;
@@ -21,9 +22,6 @@ struct zoom_in_out_t: interaction_t {
     bool canRotate;
     bool canLook;
 
-    unsigned activeState;
-    float stateTime;
-
     reactphysics3d::Vector3 targetPosition;
     reactphysics3d::Quaternion targetRotation;
 
@@ -40,4 +38,6 @@ struct zoom_in_out_t: interaction_t {
     
     void interact() override;
     void update(float deltaTime);
+
+    Task doAnimation();
 };

@@ -5,6 +5,7 @@
 #include "scripts/mouse_look.h"
 #include "scripts/interactable.h"
 #include "scripts/teleporter.h"
+#include "pavo/pavo_interactable.h"
 
 // interactions
 #include "interactions/game_object_activeinactive.h"
@@ -20,6 +21,7 @@ extern player_movement_t* player_movements[];
 extern mouse_look_t* mouse_looks[];
 extern interactable_t* interactables[];
 extern teleporter_t* teleporters[];
+extern pavo_interactable_t* pavo_interactables[];
 
 // interactions
 extern game_object_activeinactive_t* game_object_activeinactives[];

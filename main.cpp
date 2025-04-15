@@ -27,7 +27,14 @@
 #include "components/physics.h"
 #include "components/fonts.h"
 
+#include "pavo/pavo.h"
+
+#include "dcue/coroutines.h"
+
+float timeDeltaTime;
+
 // #define DEBUG_PHYSICS
+// #define DEBUG_LOOKAT
 
 #define ARRAY_SIZE(array)                (sizeof(array) / sizeof(array[0]))
 
@@ -2123,6 +2130,8 @@ extern "C" const char* getExecutableTag() {
 }
 
 interactable_t* lookAtInteractable = nullptr;
+pavo_interactable_t* lookAtInteractablePavo = nullptr;
+
 const char* lookAtMessage = nullptr;
 const char* messageSpeaker = nullptr;
 const char* messageText = nullptr;
@@ -2301,15 +2310,25 @@ void show_message_t::interact() {
 		if (timedHide) {
 			timeToGo = time;
 			if (timedHideCameraLock) {
-				// TODO pavo push state
+				pavo_state_t::pushEnv({ .canMove = false, .canRotate = false, .onInteraction = [this]() { return this->onInteraction(); }}, &oldState);
 			}
 		} else {
-			// TODO pavo push state
+			pavo_state_t::pushEnv({ .canMove = false, .canRotate = false, .onInteraction = [this]() { return this->onInteraction(); }}, &oldState);
 		}
 	}
 }
 
-// todo: onInteraction (pavo)
+pavo_interaction_delegate_t show_message_t::onInteraction() {
+	if (/*messaging.NonPavoIsTyping ||*/ nextMessage())
+	{
+		return [this]() { return this->onInteraction(); };
+	}
+	else
+	{
+		pavo_state_t::popEnv(&oldState);
+		return nullptr;
+	}
+}
 
 bool show_message_t::nextMessage() {
 	if (messages[currentMessageIndex] == nullptr || !oneShot) {
@@ -2344,7 +2363,7 @@ void show_message_t::update(float deltaTime) {
 				timeToGo = time;
 			} else {
 				if (timedHideCameraLock) {
-					// TODO pavo pop state
+					pavo_state_t::popEnv(&oldState);
 				}
 			}
 		}
@@ -2362,60 +2381,45 @@ void teleporter_trigger_t::interact() {
 	}
 }
 
-void zoom_in_out_t::update(float deltaTime) {
-	switch(activeState) {
-		case 1: // zoom in
-			{
-				stateTime += deltaTime;
-				if (stateTime > zoomInDuration) {
-					stateTime = zoomInDuration;
-					activeState = 2;
-				}
+Task zoom_in_out_t::doAnimation() {
+	float startTime = 0;
 
-				reactphysics3d::Transform(
-					finalPosition  + (targetPosition - finalPosition) * (stateTime / zoomInDuration),
-					reactphysics3d::Quaternion::slerp(finalRotation, targetRotation, (stateTime / zoomInDuration))
-				).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
-				
-				if (activeState == 2) {
-					stateTime = 0;
-				}
-			}
-			break;
-		case 2: // inactive
-			{
-				stateTime += deltaTime;
-				if (stateTime > inactiveDuration) {
-					stateTime = 0;
-					activeState = 3;
-				}
+	do {
+		reactphysics3d::Transform(
+			finalPosition  + (targetPosition - finalPosition) * (startTime / zoomInDuration),
+			reactphysics3d::Quaternion::slerp(finalRotation, targetRotation, (startTime / zoomInDuration))
+		).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
+		startTime += timeDeltaTime;
+		if (startTime > zoomInDuration) {
+			startTime = zoomInDuration;
+		}
+		co_yield Step::Frame;
+	} while (startTime < zoomInDuration);
 
-				reactphysics3d::Transform(
-					targetPosition,
-					targetRotation
-				).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
-			}
-			break;
-		case 3: // zoom out
-			{
-				stateTime += deltaTime;
-				if (stateTime > zoomOutDuration) {
-					stateTime = zoomOutDuration;
-					activeState = 0;
-				}
-				reactphysics3d::Transform(
-					targetPosition  + (finalPosition - targetPosition) * (stateTime / zoomOutDuration),
-					reactphysics3d::Quaternion::slerp(targetRotation, finalRotation, (stateTime / zoomOutDuration))
-				).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
-			}
-			break;
-		case 0:
-			// not triggered
-		default:
-			;
-	}
+	// Can't use wait here due to LTW ovewrites. TODO: FIX LTW OVEWRITES
+	startTime = 0;
+	do {
+		reactphysics3d::Transform(
+			targetPosition,
+			targetRotation
+		).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
+		startTime += timeDeltaTime;
+		co_yield Step::Frame;
+	} while(startTime < inactiveDuration);
+
+	startTime = 0;
+	do {
+		reactphysics3d::Transform(
+			targetPosition  + (finalPosition - targetPosition) * (startTime / zoomOutDuration),
+			reactphysics3d::Quaternion::slerp(targetRotation, finalRotation, (startTime / zoomOutDuration))
+		).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
+		startTime += timeDeltaTime;
+		if (startTime > zoomOutDuration) {
+			startTime = zoomOutDuration;
+		}
+		co_yield Step::Frame;
+	} while (startTime < zoomOutDuration);
 }
-
 void zoom_in_out_t::interact() {
 	reactphysics3d::Transform targetTransform;
 	targetTransform.setFromOpenGL(&gameObjects[targetIndex]->ltw.m00);
@@ -2430,8 +2434,7 @@ void zoom_in_out_t::interact() {
 	targetPosition = targetPosition  + (finalPosition - targetPosition) * startingDistance;
 	targetRotation = reactphysics3d::Quaternion::slerp(targetRotation, finalRotation, startingDistance);
 
-	activeState = 1;
-	stateTime = 0;
+	queueCoroutine(this->doAnimation());
 }
 
 
@@ -2470,13 +2473,16 @@ void player_movement_t::update(float deltaTime) {
 	gameObject->position.z += movementZ;
 }
 
+template<float maxDistance>
 class RaycastDumper: public reactphysics3d::RaycastCallback {
 	box_collider_t* collider = nullptr;
+	float distance = 1000;
 public:
 	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
 		auto collider2 = (box_collider_t*)raycastInfo.collider->getUserData();
 		if (collider2->gameObject->isActive()) {
 			collider = collider2;
+			distance = raycastInfo.hitFraction * maxDistance;
 			return raycastInfo.hitFraction;
 		} else {
 			return -1;
@@ -2484,38 +2490,49 @@ public:
 	}
 
 	void showMessage() {
-		lookAtMessage = nullptr;
+		auto oldLookAtInteractablePavo = lookAtInteractablePavo;
 		lookAtInteractable = nullptr;
+		lookAtInteractablePavo = nullptr;
 		const char** newLookAtAction = nullptr;
+
 		if (collider && playa) {
 			#if defined(DEBUG_LOOKAT)
 			pointedGameObject = collider->gameObject;
 			#endif
-			// std::cout << "Hit collider: " << collider << " gameObject " << collider->gameObject << std::endl;
-			float distance = sqrtf(
-				(playa->ltw.pos.x - collider->gameObject->ltw.pos.x) * (playa->ltw.pos.x - collider->gameObject->ltw.pos.x) +
-				(playa->ltw.pos.y - collider->gameObject->ltw.pos.y) * (playa->ltw.pos.y - collider->gameObject->ltw.pos.y) +
-				(playa->ltw.pos.z - collider->gameObject->ltw.pos.z) * (playa->ltw.pos.z - collider->gameObject->ltw.pos.z)
-			);
 
-			if (auto component = collider->gameObject->getComponents<interactable_t>()) {
-				do {
-					if ( (*component)->interactionRadius >= distance) {
-						break;
+			if (auto interactable = collider->gameObject->getComponent<pavo_interactable_t>()) {
+				if (interactable->getInteractionRadius() >= distance) {
+					lookAtInteractablePavo = interactable;
+				}
+			} else if (auto interactable = collider->gameObject->getComponent<interactable_t>()) {
+				
+				if ( interactable->interactionRadius >= distance) {
+					lookAtInteractable = interactable;
+					lookAtMessage = interactable->lookAtMessage;
+					if (interactable->messages) {
+						newLookAtAction = interactable->messages;
 					}
-					lookAtInteractable = (*component);
-					lookAtMessage = (*component)->lookAtMessage;
-					if ((*component)->messages) {
-						newLookAtAction = (*component)->messages;
-					}
-					break;
-				} while (*++component);
+				}
 			}
 		}
 
 		if (newLookAtAction != lookAtAction) {
 			lookAtAction = newLookAtAction;
 			lookAtActionIndex = -1;
+		}
+		if (oldLookAtInteractablePavo != lookAtInteractablePavo) {
+			if (oldLookAtInteractablePavo) {
+				oldLookAtInteractablePavo->lookAway();
+			}
+			if (lookAtInteractablePavo) {
+				lookAtInteractablePavo->lookAt();
+			}
+		} else if (!lookAtInteractablePavo) {
+			if (lookAtInteractable) {
+				lookAtMessage = lookAtInteractable->lookAtMessage;
+			} else {
+				lookAtMessage = nullptr;
+			}
 		}
 	}
 };
@@ -2545,7 +2562,7 @@ void mouse_look_t::update(float deltaTime) {
 	#if defined(DEBUG_LOOKAT)
 	pointedGameObject = nullptr;
 	#endif
-	RaycastDumper dumper;
+	RaycastDumper<100.f> dumper;
 
 	// physics is one step behind here
 	physicsWorld->raycast(ray, &dumper);
@@ -2606,6 +2623,7 @@ V3d ComputeAxisAlignedScale(const r_matrix_t* mtx) {
     return scale;
 }
 
+extern box_collider_t box_collider_531;
 void box_collider_t::update(float deltaTime) {
 	if (!rigidBody) {
 		reactphysics3d::Transform t;
@@ -2617,8 +2635,18 @@ void box_collider_t::update(float deltaTime) {
 		#endif
 	}
 
+	matrix_t localOffset = {
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0,
+		center.x, center.y, center.z, 1
+	};
+	mat_load((matrix_t*)&gameObject->ltw);
+	mat_apply(&localOffset);
+	mat_store(&localOffset);
+	
 	reactphysics3d::Transform t;
-	t.setFromOpenGL(&gameObject->ltw.m00);
+	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 
 	V3d scale = ComputeAxisAlignedScale(&gameObject->ltw);
@@ -2629,7 +2657,7 @@ void box_collider_t::update(float deltaTime) {
 			physicsCommon.destroyBoxShape(boxShape);
 		}
 		boxShape = physicsCommon.createBoxShape(reactphysics3d::Vector3(scale.x * halfSize.x, scale.y * halfSize.y, scale.z * halfSize.z));
-		collider = rigidBody->addCollider(boxShape, reactphysics3d::Transform(reactphysics3d::Vector3(scale.x * center.x, scale.x * center.y, scale.x *center.z), reactphysics3d::Quaternion::identity()));
+		collider = rigidBody->addCollider(boxShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
 		lastScale = scale;
 	}
@@ -2646,9 +2674,18 @@ void sphere_collider_t::update(float deltaTime) {
 		#endif
 	}
 
-	
+	matrix_t localOffset = {
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0,
+		center.x, center.y, center.z, 1
+	};
+	mat_load((matrix_t*)&gameObject->ltw);
+	mat_apply(&localOffset);
+	mat_store(&localOffset);
+
 	reactphysics3d::Transform t;
-	t.setFromOpenGL(&gameObject->ltw.m00);
+	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 
 	V3d scale3 = ComputeAxisAlignedScale(&gameObject->ltw);
@@ -2659,7 +2696,7 @@ void sphere_collider_t::update(float deltaTime) {
 			physicsCommon.destroySphereShape(sphereShape);
 		}
 		sphereShape = physicsCommon.createSphereShape(scale * radius);
-		collider = rigidBody->addCollider(sphereShape, reactphysics3d::Transform(reactphysics3d::Vector3(center.x * scale3.x, center.y* scale3.y, center.z * scale3.z), reactphysics3d::Quaternion::identity()));
+		collider = rigidBody->addCollider(sphereShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
 		lastScale = scale3;
 	}
@@ -2676,8 +2713,18 @@ void capsule_collider_t::update(float deltaTime) {
 		#endif
 	}
 
+	matrix_t localOffset = {
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0,
+		center.x, center.y, center.z, 1
+	};
+	mat_load((matrix_t*)&gameObject->ltw);
+	mat_apply(&localOffset);
+	mat_store(&localOffset);
+
 	reactphysics3d::Transform t;
-	t.setFromOpenGL(&gameObject->ltw.m00);
+	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 
 	V3d scale3 = ComputeAxisAlignedScale(&gameObject->ltw);
@@ -2689,7 +2736,7 @@ void capsule_collider_t::update(float deltaTime) {
 			physicsCommon.destroyCapsuleShape(capsuleShape);
 		}
 		capsuleShape = physicsCommon.createCapsuleShape(scale.x * radius, scale.y * height);
-		collider = rigidBody->addCollider(capsuleShape, reactphysics3d::Transform(reactphysics3d::Vector3(center.x * scale3.x, center.y * scale3.y, center.z * scale3.z), reactphysics3d::Quaternion::identity()));
+		collider = rigidBody->addCollider(capsuleShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
 		lastScale = scale3;
 	}
@@ -2916,6 +2963,11 @@ void drawTextLeftBottom(font_t* font, float em, float x, float y, const char* te
 	drawText(font, em, x, y, text, a, r, g, b, x);
 }
 
+std::list<Task> coroutines;
+void queueCoroutine(Task&& coroutine) {
+	coroutines.push_back(std::move(coroutine));
+}
+
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -2978,6 +3030,15 @@ int main(int argc, const char** argv) {
 	#endif
 
 	physicsWorld = physicsCommon.createPhysicsWorld();
+	pavo_state_t::Initialize({
+		.paused = false,
+		.canMove = true,
+		.canRotate = true,
+		.canLook = true,
+		.onInteraction = nullptr,
+		.cursorVisible = false,
+		.gameMode = pgm_Ingame
+	});
 
 	#if defined(DEBUG_PHYSICS)
 	physicsWorld->setIsDebugRenderingEnabled(true);
@@ -2994,6 +3055,8 @@ int main(int argc, const char** argv) {
         auto deltaTime = std::chrono::duration_cast<std::chrono::duration<float>>(tp_this_frame - tp_last_frame).count();
         tp_last_frame = tp_this_frame;
 
+		timeDeltaTime = deltaTime;
+
         // get input
         auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
         if (contMaple) {
@@ -3009,21 +3072,37 @@ int main(int argc, const char** argv) {
 				}
 
 				static bool last_b = false;
-				if (!last_b && state->b && lookAtAction) {
-					lookAtActionIndex++;
-					if (!lookAtAction || lookAtAction[lookAtActionIndex] == nullptr) {
-						lookAtActionIndex = -1;
-						messageSpeaker = nullptr;
-						messageText = nullptr;
-					} else {
-						messageText = lookAtAction[lookAtActionIndex];
+				if (!last_b && state->b) {
+					if (lookAtInteractablePavo) {
+						lookAtInteractablePavo->focused();
+					} else if (lookAtAction) {
+						lookAtActionIndex++;
+						if (!lookAtAction || lookAtAction[lookAtActionIndex] == nullptr) {
+							lookAtActionIndex = -1;
+							messageSpeaker = nullptr;
+							messageText = nullptr;
+						} else {
+							messageText = lookAtAction[lookAtActionIndex];
+						}
 					}
 				}
 				last_b = state->b;
 
 				static bool last_x = false;
-				if (!last_x && state->x && lookAtInteractable) {
-					lookAtInteractable->interact();
+				if (!last_x && state->x) {
+					if (pavo_state_t::getEnv()->onInteraction) {
+						auto oldHandler = pavo_state_t::getEnv()->onInteraction;
+						pavo_state_t::getEnv()->onInteraction = nullptr;
+						auto newHandler = oldHandler();
+
+						if (newHandler) {
+							pavo_state_t::getEnv()->onInteraction = newHandler;
+						}
+					} else if (lookAtInteractablePavo) {
+						lookAtInteractablePavo->interact();
+					} else if (lookAtInteractable) {
+						lookAtInteractable->interact();
+					}
 				}
 				last_x = state->x;
             }
@@ -3091,7 +3170,14 @@ int main(int argc, const char** argv) {
 			}
 		}
 
-		// ugly hack: zoom out is after position set
+		// zoom in out interactions
+		for (auto zoom_in_out = zoom_in_outs; *zoom_in_out; zoom_in_out++) {
+			if ((*zoom_in_out)->gameObject->isActive()) {
+				// (*zoom_in_out)->update(deltaTime);
+			}
+		}
+
+		// ugly hack: coroutines are after position set
 
         for (auto go: gameObjects) {
 			if (!go->isActive()) {
@@ -3151,10 +3237,13 @@ int main(int argc, const char** argv) {
             mat_store((matrix_t*)&go->ltw);
         }
 
-		// zoom in out interactions
-		for (auto zoom_in_out = zoom_in_outs; *zoom_in_out; zoom_in_out++) {
-			if ((*zoom_in_out)->gameObject->isActive()) {
-				(*zoom_in_out)->update(deltaTime);
+		// coroutines
+		for (auto coroutine = coroutines.begin(); coroutine != coroutines.end(); ) {
+			coroutine->next();
+			if (coroutine->done()) {
+				coroutine = coroutines.erase(coroutine);
+			} else {
+				coroutine++;
 			}
 		}
 

@@ -25,6 +25,7 @@ struct show_message_t: interaction_t {
     // internal state
     int currentMessageIndex;
     float timeToGo;
+    std::shared_ptr<pavo_flat_game_env_t> oldState;
     
     constexpr show_message_t(native::game_object_t* owner, int index, bool blocking, 
                               const char** messages,
@@ -40,4 +41,5 @@ struct show_message_t: interaction_t {
     void update(float deltaTime);
 
     bool nextMessage();
+    pavo_interaction_delegate_t onInteraction();
 };

@@ -8,56 +8,311 @@ using UnityEngine.SceneManagement;
 using UnityEditor.Animations;
 using mango;
 using System.Linq;
-using Ludiq;
 using UnityEngine.UI;
-using Pavo.Behaviors;
-using Pavo;
 using Bolt;
 
+namespace PseudoPavo
+{
+    class GameObject_SetActive: Bolt.Unit
+    {
+        public IUnit real;
+        public GameObject target;
+        public bool SetTo;
+        protected override void Definition()
+        {
+
+        }
+
+        public GameObject_SetActive(IUnit real, GameObject target, bool SetTo)
+        {
+            this.real = real;
+            this.target = target;
+            this.SetTo = SetTo;
+        }
+    }
+
+    class BoxCollider_SetEnabled : Bolt.Unit
+    {
+        public IUnit real;
+        public BoxCollider target;
+        public bool SetTo;
+        protected override void Definition()
+        {
+
+        }
+
+        public BoxCollider_SetEnabled(IUnit real, BoxCollider target, bool SetTo)
+        {
+            this.real = real;
+            this.target = target;
+            this.SetTo = SetTo;
+        }
+    }
+}
+
+public static class Extensions2
+{
+    public static string GetOrNullUnit(this Dictionary<Bolt.IUnit, string> dict, Dictionary<Bolt.IUnit, Bolt.IUnit> pseudo, Bolt.ControlOutput c)
+    {
+        var connections = c.connections.ToArray();
+        if (connections.Length > 1)
+        {
+            throw new Exception("Unsupported connection length " + connections.Length);
+        }
+
+        Bolt.IUnit u = null;
+        if (connections.Length == 1)
+        {
+            u = connections[0].destination.unit;
+        }
+
+        if (u == null)
+        {
+            return "&pavo_unit_null_0";
+        }
+        else
+        {
+            return $"&{dict[pseudo[u]]}";
+        }
+    }
+
+} 
 public class DreamExporter : MonoBehaviour
 {
+
+    static T GetStaticValueInput<T>(Bolt.ValueInput v, T self)
+    {
+        if (!v.hasDefaultValue || v.connection != null)
+        {
+            throw new Exception("ValueInput is not static");
+        }
+
+        var value = v.unit.defaultValues[v.key];
+        if (value== null && v.nullMeansSelf)
+        {
+            return self;
+        }else
+        {
+            return (T)value;
+        }
+    }
+
+    class UnitList
+    {
+        public string name;
+        public Type type;
+        public List<Bolt.IUnit> list = new List<Bolt.IUnit>();
+        public Dictionary<Bolt.IUnit, int> index = new Dictionary<Bolt.IUnit, int>();
+
+        public UnitList(string name, Type type)
+        {
+            this.name = name;
+            this.type = type;
+        }
+    }
     [MenuItem("Dreamcast/Export FlowMachines")]
     public static void ProcessFlowMachines()
     {
         var ds = CollectScene();
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("#include \"pavo/pavo.h\"");
+        sb.AppendLine("#include \"pavo/pavo_interactable.h\"");
+        sb.AppendLine("#include \"pavo/pavo_units.h\"");
 
         Debug.Log(ds.flowMachines.Count + " flow machines found");
 
         HashSet<Type> unitTypes = new HashSet<Type>();
-        foreach (var flowMachine in ds.flowMachines)
+        Dictionary<Bolt.IUnit, int> unitIndex = new Dictionary<Bolt.IUnit, int>();
+        Dictionary<Bolt.IUnit, string> unitDesc = new Dictionary<Bolt.IUnit, string>();
+        Dictionary<Bolt.IUnit, Bolt.IUnit> resovePseudo = new Dictionary<Bolt.IUnit, Bolt.IUnit>();
+
+        Dictionary<Type, UnitList> perUnitLists = new Dictionary<Type, UnitList>()
         {
-            foreach (var unit in flowMachine.graph.units)
+            { typeof(Pavo.WaitInteraction), new UnitList("pavo_unit_wait_for_interaction", typeof(Pavo.WaitInteraction))},
+            { typeof(Pavo.ShowMessage), new UnitList("pavo_unit_show_message", typeof(Pavo.ShowMessage)) },
+            { typeof(Pavo.HasItem), new UnitList("pavo_unit_has_item", typeof(Pavo.HasItem)) },
+            { typeof(Pavo.DispenseItem), new UnitList("pavo_unit_dispense_item", typeof(Pavo.DispenseItem)) },
+            { typeof(Pavo.ShowChoice), new UnitList("pavo_unit_show_choice", typeof(Pavo.ShowChoice)) },
+            { typeof(Pavo.EndInteraction), new UnitList("pavo_unit_end_interaction", typeof(Pavo.EndInteraction)) },
+            { typeof(PseudoPavo.GameObject_SetActive), new UnitList("pavo_unit_set_active", typeof (PseudoPavo.GameObject_SetActive)) },
+            { typeof(PseudoPavo.BoxCollider_SetEnabled), new UnitList("pavo_unit_set_enabled", typeof (PseudoPavo.BoxCollider_SetEnabled)) },
+        };
+
+
+
+        for (int flowMachineNum = 0; flowMachineNum < ds.flowMachines.Count; flowMachineNum++)
+        {
+            var flowMachine = ds.flowMachines[flowMachineNum];
+
+            sb.AppendLine($"extern pavo_interactable_t pavo_interactable_{flowMachineNum};");
+
+            for (int unitNum = 0; unitNum < flowMachine.graph.units.Count; unitNum++)
             {
-                unitTypes.Add(unit.GetType());
+                var unit = flowMachine.graph.units[unitNum];
+                var pseudoUnit = unit;
 
                 if (unit is Bolt.InvokeMember)
                 {
                     var invokeMember = unit as Bolt.InvokeMember;
-                    if (invokeMember.target != null)
+
+                    var targetType = invokeMember.target.type;
+
+                    if (targetType != typeof(GameObject))
                     {
-                        var targetType = invokeMember.target.type;
-                        var targetName = invokeMember.member.name;
-                        var targetParameters = invokeMember.inputParameters;
-
-                        Debug.Log($"InvokeMember: {targetType} {targetName}");
-                        foreach (var parameter in targetParameters)
-                        {
-                            Debug.Log($"Parameter: {parameter.Key} {parameter.Value}");
-                        }
+                        throw new Exception("Unsupported type " + targetType);
                     }
-                }
 
-                if (unit is Bolt.SetMember)
+                    var targetName = invokeMember.member.name;
+
+                    if (targetName != "SetActive")
+                    {
+                        throw new Exception("Unsupported member " + targetName);
+                    }
+
+                    var targetParameters = invokeMember.inputParameters;
+
+                    if (targetParameters.Count != 1)
+                    {
+                        throw new Exception("Invalid parameter count " + invokeMember.inputParameters.Count);
+                    }
+
+                    pseudoUnit = new PseudoPavo.GameObject_SetActive(unit, GetStaticValueInput<GameObject>(invokeMember.target, flowMachine.gameObject), GetStaticValueInput<bool>(targetParameters[0], false));
+                }
+                else if (unit is Bolt.SetMember)
                 {
                     var setMember = unit as Bolt.SetMember;
-                    if (setMember.target != null)
+                    var targetType = setMember.target.type;
+                    var targetName = setMember.member.name;
+                    var targetValue = setMember.input;
+
+                    if (targetType != typeof(BoxCollider))
                     {
-                        var targetType = setMember.target.type;
-                        var targetName = setMember.member.name;
-                        var targetValue = setMember.input;
-                        Debug.Log($"SetMember: {targetType} {targetName} to {targetValue}");
+                        throw new Exception("Unsupported type " + targetType);
                     }
+
+                    if (targetName != "enabled")
+                    {
+                        throw new Exception("Unsupported name " + targetName);
+                    }
+                    
+                    pseudoUnit = new PseudoPavo.BoxCollider_SetEnabled(unit, GetStaticValueInput<BoxCollider>(setMember.target, flowMachine.gameObject.GetComponent<BoxCollider>()), GetStaticValueInput<bool>(targetValue, false));
                 }
+
+                unitIndex.Add(pseudoUnit, unitNum);
+
+                if (!perUnitLists.ContainsKey(pseudoUnit.GetType()))
+                {
+                    throw new Exception("Unable to map type " + pseudoUnit.GetType());
+                }
+
+                {
+                    var unitDeclNum = perUnitLists[pseudoUnit.GetType()].list.Count;
+                    perUnitLists[pseudoUnit.GetType()].index[pseudoUnit] = unitDeclNum;
+                    perUnitLists[pseudoUnit.GetType()].list.Add(pseudoUnit);
+
+                    sb.AppendLine($"extern {perUnitLists[pseudoUnit.GetType()].name}_t {perUnitLists[pseudoUnit.GetType()].name}_{unitDeclNum};");
+                    unitDesc.Add(pseudoUnit, $"{perUnitLists[pseudoUnit.GetType()].name}_{unitDeclNum}");
+                    resovePseudo[unit] = pseudoUnit;
+                }
+            }
+        }
+
+        for (int flowMachineNum = 0; flowMachineNum < ds.flowMachines.Count; flowMachineNum++)
+        {
+            var flowMachine = ds.flowMachines[flowMachineNum];
+
+            for (int unitNum = 0; unitNum < flowMachine.graph.units.Count; unitNum++)
+            {
+                var unit = resovePseudo[flowMachine.graph.units[unitNum]];
+                var unitDeclIndex = perUnitLists[unit.GetType()].index[unit];
+
+                if (unit.GetType() == typeof(Pavo.WaitInteraction))
+                {
+                    var waitInteraction = unit as Pavo.WaitInteraction;
+
+                    if (waitInteraction.CustomLookAt || waitInteraction.HasProximityCollider)
+                    {
+                        throw new Exception("WaitInteraction with CustomLookAt or HasProximityCollider is not supported");
+                    }
+
+
+                    sb.Append($"pavo_unit_wait_for_interaction_t pavo_unit_wait_for_interaction_{unitDeclIndex} = {{ ");
+                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, waitInteraction.OnInteract)}, {unitDesc.GetOrNullUnit(resovePseudo, waitInteraction.OnFocus)}, &pavo_interactable_{flowMachineNum}, {bools(waitInteraction.Initial)}, {escapeCodeStringOrNull(GetStaticValueInput<string>(waitInteraction.LookAtText, null))}, {waitInteraction.Radious?? 10} ");
+                    sb.AppendLine("};");
+                }
+                else if (unit.GetType() == typeof(Pavo.ShowMessage))
+                {
+                    var showMessage = unit as Pavo.ShowMessage;
+
+                    string message = "nullptr";
+                    if (showMessage.Messages.Length != 0)
+                    {
+                        sb.AppendLine($"static const char* show_message_{unitDeclIndex}_messages[] = {{ {string.Join(", ", showMessage.Messages.Select(x => escapeCodeString(x)).ToArray())}, nullptr, }};");
+                        message = $"show_message_{unitDeclIndex}_messages";
+                    }
+
+
+                    sb.Append($"pavo_unit_show_message_t pavo_unit_show_message_{unitDeclIndex} = {{ ");
+                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, showMessage.exit)}, {escapeCodeStringOrNull(showMessage.Speaker)}, {message}, {showMessage.AutomaticTimeOut}, ");
+                    sb.AppendLine("};");
+                }
+                else if (unit.GetType() == typeof(Pavo.HasItem))
+                {
+                    var hasItem = unit as Pavo.HasItem;
+                    sb.Append($"pavo_unit_has_item_t pavo_unit_has_item_{unitDeclIndex} = {{ ");
+                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, hasItem.Yes)}, {unitDesc.GetOrNullUnit(resovePseudo, hasItem.No)}, {escapeCodeStringOrNull(hasItem.Item)}");
+                    sb.AppendLine("};");
+                }
+                else if (unit.GetType() == typeof(Pavo.DispenseItem))
+                {
+                    var dispenseItem = unit as Pavo.DispenseItem;
+                    sb.Append($"pavo_unit_dispense_item_t pavo_unit_dispense_item_{unitDeclIndex} = {{ ");
+                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, dispenseItem.exit)}, {escapeCodeStringOrNull(GetStaticValueInput<string>(dispenseItem.Item, null))}");
+                    sb.AppendLine("};");
+                }
+                else if (unit.GetType() == typeof(Pavo.ShowChoice))
+                {
+                    var showChoice = unit as Pavo.ShowChoice;
+                    if (showChoice.ChoiceOutputs.Count != 2)
+                    {
+                        throw new Exception($"Unsupported ChoiceOutputs: {showChoice.ChoiceOutputs.Count}");
+                    }
+
+                    string options = $"pavo_unit_show_choice_{unitDeclIndex}_options";
+                    sb.AppendLine($"static const char* pavo_unit_show_choice_{unitDeclIndex}_options[] = {{ {string.Join(", ", showChoice.Options.Select(x => escapeCodeString(x)).ToArray())}, nullptr, }};");
+
+                    string choices = $"pavo_unit_show_choice_{unitDeclIndex}_choices";
+                    sb.AppendLine($"static pavo_unit_t* pavo_unit_show_choice_{unitDeclIndex}_choices[] = {{ {string.Join(", ", showChoice.ChoiceOutputs.Select(x => $"{unitDesc.GetOrNullUnit(resovePseudo, x)}").ToArray())}, nullptr, }};");
+
+
+                    sb.Append($"pavo_unit_show_choice_t pavo_unit_show_choice_{unitDeclIndex} = {{ ");
+                    sb.Append($"{choices}, {unitDesc.GetOrNullUnit(resovePseudo, showChoice.After)}, {escapeCodeStringOrNull(showChoice.Prompt)}, {options}");
+                    sb.AppendLine("};");
+                }
+                else if (unit.GetType() == typeof(Pavo.EndInteraction))
+                {
+                    var endInteraction = unit as Pavo.EndInteraction;
+                    sb.AppendLine($"pavo_unit_end_interaction_t pavo_unit_end_interaction_{unitDeclIndex} = {{ &pavo_interactable_{flowMachineNum} }};");
+                }
+                else if (unit.GetType() == typeof(PseudoPavo.GameObject_SetActive))
+                {
+                    var gosa = unit as PseudoPavo.GameObject_SetActive;
+                    sb.Append($"pavo_unit_set_active_t pavo_unit_set_active_{unitDeclIndex} = {{ ");
+                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, gosa.real.controlOutputs[0])}, {ds.gameObjectIndex[gosa.target]}, {bools(gosa.SetTo)}, ");
+                    sb.AppendLine("};");
+                }
+                else if (unit.GetType() == typeof(PseudoPavo.BoxCollider_SetEnabled))
+                {
+                    var bose = unit as PseudoPavo.BoxCollider_SetEnabled;
+                    sb.Append($"pavo_unit_set_enabled_t pavo_unit_set_enabled_{unitDeclIndex} = {{ ");
+                    sb.Append($"{unitDesc.GetOrNullUnit(resovePseudo, bose.real.controlOutputs[0])}, {ds.boxColliderIndex[bose.target]}, {bools(bose.SetTo)}, ");
+                    sb.AppendLine("};");
+                }
+                else
+                {
+                    throw new Exception("Unimplemented unit type: " +  unit.GetType());
+                }
+
             }
         }
 
@@ -65,6 +320,8 @@ public class DreamExporter : MonoBehaviour
         {
             Debug.Log("Found unit type: " + type);
         }
+
+        File.WriteAllText("flowmachines.cpp", sb.ToString());
     }
     [MenuItem("Dreamcast/Export Fonts")]
     public static void ProcessFonts()
@@ -468,6 +725,7 @@ public class DreamExporter : MonoBehaviour
             if (gameObject.GetComponent<MouseLook>() != null) components.Add("mouse_look");
             if (gameObject.GetComponent<Interactable>() != null) components.Add("interactable");
             if (gameObject.GetComponent<Telepotrter>() != null) components.Add("teleporter");
+            if (gameObject.GetComponent<Bolt.FlowMachine>() != null) components.Add("pavo_interactable");
 
             // interactions
             bool hasInteractions = false;
@@ -734,6 +992,15 @@ public class DreamExporter : MonoBehaviour
         }
         GenerateComponentArray(ds, sb, "zoom_in_out", ds.zoomouts);
 
+        /////////////// pavo_interactable (implicit from flowMachines) ///////////////
+        for (int flowMachineNum = 0; flowMachineNum < ds.flowMachines.Count; flowMachineNum++)
+        {
+            sb.Append($"pavo_interactable_t pavo_interactable_{flowMachineNum} = {{ ");
+            sb.Append($"nullptr, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "pavo_interactable", ds.flowMachines);
+
         File.WriteAllText("scripts.cpp", sb.ToString());
     }
 
@@ -758,6 +1025,7 @@ public class DreamExporter : MonoBehaviour
         GenerateComponentDeclarations(ds, sb, "mouse_look", ds.mouseLooks, ds.mouseLookIndex);
         GenerateComponentDeclarations(ds, sb, "interactable", ds.interactables, ds.interactableIndex);
         GenerateComponentDeclarations(ds, sb, "teleporter", ds.teleporters, ds.teleporterIndex);
+        GenerateComponentDeclarations(ds, sb, "pavo_interactable", ds.flowMachines, ds.flowMachineIndex);
 
         // interactions
         Dictionary<IInteraction, int> interactionsIndex = new Dictionary<IInteraction, int>();
@@ -1601,8 +1869,8 @@ public class DreamExporter : MonoBehaviour
         public Dictionary<zoomout, int> zoomoutIndex;
 
         // FlowMachines
-        public List<FlowMachine> flowMachines;
-        public Dictionary<FlowMachine, int> flowMachineIndex;
+        public List<Bolt.FlowMachine> flowMachines;
+        public Dictionary<Bolt.FlowMachine, int> flowMachineIndex;
 
 
         // Physics
@@ -1767,7 +2035,7 @@ public class DreamExporter : MonoBehaviour
         ds.zoomoutIndex = CreateComponentIndex(ds.zoomouts);
 
         // FlowMachines
-        ds.flowMachines = GetSceneComponents<FlowMachine>();
+        ds.flowMachines = GetSceneComponents<Bolt.FlowMachine>();
         ds.flowMachineIndex = CreateComponentIndex(ds.flowMachines);
 
         // Physics

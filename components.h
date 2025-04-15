@@ -16,8 +16,22 @@ struct player_movement_t;
 struct mouse_look_t;
 struct interactable_t;
 struct teleporter_t;
+struct pavo_interactable_t;
 
 // interactions
+/*
+- ShowMessage
+PlaySound
+- gameobjectactiveinactive2
+GameObjectActiveInactive
+ObjectDispenser
+- timedactiveinactive
+- Fadein
+CantMove
+Fadeout
+- TeleporterTrigger
+- zoomout
+*/
 struct game_object_activeinactive_t;
 struct timed_activeinactive_t;
 struct fadein_t;
@@ -44,8 +58,8 @@ enum component_type_t {
     ct_player_movement,
     ct_mouse_look,
     ct_interactable,
-    ct_pavo_interactable,
     ct_teleporter,
+    ct_pavo_interactable,
 
     // physics
     ct_box_collider,
@@ -84,6 +98,7 @@ struct component_t {
         mouse_look_t** mouseLooks;
         interactable_t** interactables;
         teleporter_t** teleporters;
+        pavo_interactable_t** pavoInteractables;
 
         // interactions
         game_object_activeinactive_t** gameObjectActiveinactives;

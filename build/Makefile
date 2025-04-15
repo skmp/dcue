@@ -14,7 +14,7 @@ DATA_DIR=repack-data/tlj
 # include common.mk
 include reactphysics3d.mk
 OBJS = \
-	../main.o ../vendor/gldc/alloc.o ../first_level/hierarchy.o ../first_level/components.o ../first_level/animations.o ../first_level/cameras.o ../first_level/scripts.o ../first_level/physics.o ../first_level/fonts.o \
+	../main.o ../pavo/pavo.o ../vendor/gldc/alloc.o ../first_level/hierarchy.o ../first_level/components.o ../first_level/animations.o ../first_level/cameras.o ../first_level/scripts.o ../first_level/physics.o ../first_level/fonts.o ../first_level/flowmachines.o \
 	\
 	$(RP3D_OBJECTS)
 
@@ -55,7 +55,8 @@ CXXFLAGS += \
 	-Wno-multichar -Wno-unused-value -Wno-char-subscripts -Wno-reorder \
 	-Wno-unused-function -Wno-class-memaccess -fno-permissive \
 	-fno-asynchronous-unwind-tables -fno-non-call-exceptions \
-	-fno-strict-aliasing -fwrapv -Wno-unknown-pragmas
+	-fno-strict-aliasing -fwrapv -Wno-unknown-pragmas \
+	-fcoroutines
 
 KOS_CPPFLAGS += -fbuiltin -ffast-math -ffp-contract=fast \
 	-mfsrra -mfsca -ml -fipa-pta -fno-enforce-eh-specs
