@@ -2721,10 +2721,11 @@ void mouse_look_t::update(float deltaTime) {
 						// TODO
 						lookAtMessage = nullptr;
 					}
-				} else {
-					// TODO
-					lookAtMessage = nullptr;
 				}
+				//  else {
+				// 	// TODO
+				// 	lookAtMessage = nullptr;
+				// }
  			} else {
 				if (ii2LookAt != nullptr) {
 					ii2LookAt->lookAway();
@@ -3254,9 +3255,6 @@ int main(int argc, const char** argv) {
         
         auto deltaTime = std::chrono::duration_cast<std::chrono::duration<float>>(tp_this_frame - tp_last_frame).count();
         tp_last_frame = tp_this_frame;
-
-		timeDeltaTime = deltaTime;
-
         // get input
         auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
         if (contMaple) {
@@ -3272,6 +3270,9 @@ int main(int argc, const char** argv) {
 				}
             }
         }
+
+		timeDeltaTime = deltaTime;
+
         
 		// components
         for(auto& animator: animators) {
