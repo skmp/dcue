@@ -12,11 +12,62 @@ using Ludiq;
 using UnityEngine.UI;
 using Pavo.Behaviors;
 using Pavo;
+using Bolt;
 
 public class DreamExporter : MonoBehaviour
 {
+    [MenuItem("Dreamcast/Export FlowMachines")]
+    public static void ProcessFlowMachines()
+    {
+        var ds = CollectScene();
+
+        Debug.Log(ds.flowMachines.Count + " flow machines found");
+
+        HashSet<Type> unitTypes = new HashSet<Type>();
+        foreach (var flowMachine in ds.flowMachines)
+        {
+            foreach (var unit in flowMachine.graph.units)
+            {
+                unitTypes.Add(unit.GetType());
+
+                if (unit is Bolt.InvokeMember)
+                {
+                    var invokeMember = unit as Bolt.InvokeMember;
+                    if (invokeMember.target != null)
+                    {
+                        var targetType = invokeMember.target.type;
+                        var targetName = invokeMember.member.name;
+                        var targetParameters = invokeMember.inputParameters;
+
+                        Debug.Log($"InvokeMember: {targetType} {targetName}");
+                        foreach (var parameter in targetParameters)
+                        {
+                            Debug.Log($"Parameter: {parameter.Key} {parameter.Value}");
+                        }
+                    }
+                }
+
+                if (unit is Bolt.SetMember)
+                {
+                    var setMember = unit as Bolt.SetMember;
+                    if (setMember.target != null)
+                    {
+                        var targetType = setMember.target.type;
+                        var targetName = setMember.member.name;
+                        var targetValue = setMember.input;
+                        Debug.Log($"SetMember: {targetType} {targetName} to {targetValue}");
+                    }
+                }
+            }
+        }
+
+        foreach(var type in unitTypes)
+        {
+            Debug.Log("Found unit type: " + type);
+        }
+    }
     [MenuItem("Dreamcast/Export Fonts")]
-    public static void ExportFonts()
+    public static void ProcessFonts()
     {
         var ds = CollectScene();
 
@@ -24,7 +75,7 @@ public class DreamExporter : MonoBehaviour
 
 
         StringBuilder sb = new StringBuilder();
-        sb.AppendLine("#include \"fonts.h\"");
+        sb.AppendLine("#include \"components/fonts.h\"");
 
         for (int dfontNum = 0; dfontNum < ds.dfonts.Count; dfontNum++)
         {
@@ -196,7 +247,7 @@ public class DreamExporter : MonoBehaviour
         StringBuilder sb = new StringBuilder();
         sb.AppendLine("#include <cstdint>");
         sb.AppendLine("#include <cstddef>");
-        sb.AppendLine("#include \"physics.h\"");
+        sb.AppendLine("#include \"components/physics.h\"");
         sb.AppendLine("#include \"dcue/types-native.h\"");
         sb.AppendLine("using namespace native;");
 
@@ -307,7 +358,7 @@ public class DreamExporter : MonoBehaviour
         StringBuilder sb = new StringBuilder();
 
         sb.AppendLine("#include <cstdint>");
-        sb.AppendLine("#include \"cameras.h\"");
+        sb.AppendLine("#include \"components/cameras.h\"");
         
         for (int cameraNum = 0; cameraNum < ds.cameras.Count; cameraNum++)
         {
@@ -529,7 +580,7 @@ public class DreamExporter : MonoBehaviour
         /////////////// proximity_interactable //////////////
         StringBuilder sb = new StringBuilder();
         sb.AppendLine("#include <cstdint>");
-        sb.AppendLine("#include \"scripts.h\"");
+        sb.AppendLine("#include \"components/scripts.h\"");
 
         for (int proximityInteractableNum = 0; proximityInteractableNum < ds.proximityInteractables.Count; proximityInteractableNum++)
         {
@@ -694,7 +745,7 @@ public class DreamExporter : MonoBehaviour
         StringBuilder sb = new StringBuilder();
 
         sb.AppendLine("#include \"components.h\"");
-        sb.AppendLine("#include \"scripts.h\"");
+        sb.AppendLine("#include \"components/scripts.h\"");
         sb.AppendLine("using namespace native;");
 
         // components
@@ -987,7 +1038,7 @@ public class DreamExporter : MonoBehaviour
 
         StringBuilder sb = new StringBuilder();
 
-        sb.AppendLine("#include \"animations.h\"");
+        sb.AppendLine("#include \"components/animations.h\"");
         sb.AppendLine();
 
         var animators = ds.animators;
@@ -1549,6 +1600,11 @@ public class DreamExporter : MonoBehaviour
         public List<zoomout> zoomouts;
         public Dictionary<zoomout, int> zoomoutIndex;
 
+        // FlowMachines
+        public List<FlowMachine> flowMachines;
+        public Dictionary<FlowMachine, int> flowMachineIndex;
+
+
         // Physics
         public List<Rigidbody> rigidbodies;
         public Dictionary<Rigidbody, int> rigidbodyIndex;
@@ -1709,6 +1765,10 @@ public class DreamExporter : MonoBehaviour
 
         ds.zoomouts = GetSceneComponents<zoomout>();
         ds.zoomoutIndex = CreateComponentIndex(ds.zoomouts);
+
+        // FlowMachines
+        ds.flowMachines = GetSceneComponents<FlowMachine>();
+        ds.flowMachineIndex = CreateComponentIndex(ds.flowMachines);
 
         // Physics
         ds.rigidbodies = GetSceneComponents<Rigidbody>();

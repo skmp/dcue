@@ -5,3 +5,4 @@
 *.d
 *.elf
 build/repack-data/*
+first_level/*

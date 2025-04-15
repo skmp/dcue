@@ -44,6 +44,7 @@ enum component_type_t {
     ct_player_movement,
     ct_mouse_look,
     ct_interactable,
+    ct_pavo_interactable,
     ct_teleporter,
 
     // physics

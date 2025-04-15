@@ -14,7 +14,7 @@ DATA_DIR=repack-data/tlj
 # include common.mk
 include reactphysics3d.mk
 OBJS = \
-	../main.o ../vendor/gldc/alloc.o ../hierarchy.o ../components.o ../animations.o ../cameras.o ../scripts.o ../physics.o ../fonts.o \
+	../main.o ../vendor/gldc/alloc.o ../first_level/hierarchy.o ../first_level/components.o ../first_level/animations.o ../first_level/cameras.o ../first_level/scripts.o ../first_level/physics.o ../first_level/fonts.o \
 	\
 	$(RP3D_OBJECTS)
 
@@ -95,7 +95,7 @@ $(TARGET_SIM): $(OBJS_SIM)
 
 
 OBJS_REPACKER= \
-	../repacker.repacker.o \
+	../tools/repacker.repacker.o \
 	\
 	../vendor/dca3/vq.repacker.o \
 	\

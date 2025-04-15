@@ -19,13 +19,13 @@
 #include <chrono>
 #include <map>
 
-#include "animations.h"
-#include "hierarchy.h"
 #include "components.h"
-#include "scripts.h"
-#include "cameras.h"
-#include "physics.h"
-#include "fonts.h"
+#include "components/animations.h"
+#include "components/hierarchy.h"
+#include "components/scripts.h"
+#include "components/cameras.h"
+#include "components/physics.h"
+#include "components/fonts.h"
 
 // #define DEBUG_PHYSICS
 

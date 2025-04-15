@@ -24,6 +24,18 @@ struct interactable_t {
     bool showMessage();
 };
 
+struct pavo_interactable_t {
+    static constexpr component_type_t componentType = ct_pavo_interactable;
+
+    native::game_object_t* gameObject;
+
+    void focused();
+    void interact();
+
+    private:
+    bool showMessage();
+};
+
 struct interaction_t {
     static constexpr component_type_t componentType = ct_interaction;
 
