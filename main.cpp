@@ -2128,16 +2128,9 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 extern "C" const char* getExecutableTag() {
 	return "tlj "  ":" ;
 }
-
-interactable_t* lookAtInteractable = nullptr;
-pavo_interactable_t* lookAtInteractablePavo = nullptr;
-
 const char* lookAtMessage = nullptr;
 const char* messageSpeaker = nullptr;
 const char* messageText = nullptr;
-
-const char** lookAtAction = nullptr;
-int lookAtActionIndex = -1;
 
 void setGameObject(component_type_t type, component_base_t* component, native::game_object_t* gameObject) {
     if (type >= ct_interaction) {
@@ -2263,12 +2256,58 @@ void proximity_interactable_t::update(float deltaTime) {
 	}
 }
 
+bool interactable_t::showMessage() {
+	if (messages) {
+		if (!messages[inspectionCounter]) {
+			inspectionCounter = 0;
+			// TODO
+			//messaging.Unfocused(this);
+			return false;
+		} else {
+			const char* message = messages[inspectionCounter++];
+			while (messages[inspectionCounter] && strlen(messages[inspectionCounter]) == 0) {
+				inspectionCounter++;
+			}
+
+			bool isLast = messages[inspectionCounter] == nullptr;
+
+			assert(!strncmp("##", message, 2) == 0);
+
+			// TODO
+			// messaging.TypeMessage(this, message, (!isLast || AlwaysShowHasModeIndicator) && ShowHasMoreIndicator, SpeakerName);
+			messageSpeaker = speakerName;
+			messageText = message;
+			return true;
+		}
+	}
+	return false;
+}
+pavo_interaction_delegate_t interactable_t::onInteraction()
+{
+	// TODO messaging
+	if (/*messaging.NonPavoIsTyping || */showMessage())
+	{
+		return [this]() { return this->onInteraction(); };
+	}
+	else
+	{
+		pavo_state_t::popEnv(&oldState);
+		return nullptr;
+	}
+}
+
+void interactable_t::focused() {
+	if (showMessage()) {
+		pavo_state_t::pushEnv({.canMove = false, .canRotate = false, .onInteraction = [this]() { return this->onInteraction(); }}, &oldState);
+	}
+}
 void interactable_t::interact() {
 	// TODO: this is very partial
 	auto interactions = gameObject->getComponents<interaction_t>();
 	if (interactions) {
 		do {
 			(*interactions)->interact();
+			assert(!(*interactions)->blocking);
 		} while(*++interactions);
 	}
 }
@@ -2444,7 +2483,7 @@ game_object_t* playa;
 void player_movement_t::update(float deltaTime) {
 	playa = gameObject;
 
-	if (!canMove) {
+	if (!canMove || !pavo_state_t::getEnv()->canMove) {
 		return;
 	}
 
@@ -2474,10 +2513,10 @@ void player_movement_t::update(float deltaTime) {
 }
 
 template<float maxDistance>
-class RaycastDumper: public reactphysics3d::RaycastCallback {
+struct LookAtCheck: public reactphysics3d::RaycastCallback {
 	box_collider_t* collider = nullptr;
 	float distance = 1000;
-public:
+
 	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
 		auto collider2 = (box_collider_t*)raycastInfo.collider->getUserData();
 		if (collider2->gameObject->isActive()) {
@@ -2486,53 +2525,6 @@ public:
 			return raycastInfo.hitFraction;
 		} else {
 			return -1;
-		}
-	}
-
-	void showMessage() {
-		auto oldLookAtInteractablePavo = lookAtInteractablePavo;
-		lookAtInteractable = nullptr;
-		lookAtInteractablePavo = nullptr;
-		const char** newLookAtAction = nullptr;
-
-		if (collider && playa) {
-			#if defined(DEBUG_LOOKAT)
-			pointedGameObject = collider->gameObject;
-			#endif
-
-			if (auto interactable = collider->gameObject->getComponent<pavo_interactable_t>()) {
-				if (interactable->getInteractionRadius() >= distance) {
-					lookAtInteractablePavo = interactable;
-				}
-			} else if (auto interactable = collider->gameObject->getComponent<interactable_t>()) {
-				
-				if ( interactable->interactionRadius >= distance) {
-					lookAtInteractable = interactable;
-					lookAtMessage = interactable->lookAtMessage;
-					if (interactable->messages) {
-						newLookAtAction = interactable->messages;
-					}
-				}
-			}
-		}
-
-		if (newLookAtAction != lookAtAction) {
-			lookAtAction = newLookAtAction;
-			lookAtActionIndex = -1;
-		}
-		if (oldLookAtInteractablePavo != lookAtInteractablePavo) {
-			if (oldLookAtInteractablePavo) {
-				oldLookAtInteractablePavo->lookAway();
-			}
-			if (lookAtInteractablePavo) {
-				lookAtInteractablePavo->lookAt();
-			}
-		} else if (!lookAtInteractablePavo) {
-			if (lookAtInteractable) {
-				lookAtMessage = lookAtInteractable->lookAtMessage;
-			} else {
-				lookAtMessage = nullptr;
-			}
 		}
 	}
 };
@@ -2552,6 +2544,9 @@ struct GroundRaycastCallback: public reactphysics3d::RaycastCallback {
 	}
 };
 
+interactable_t* mouse_look_t::inter;
+pavo_interactable_t* mouse_look_t::ii2LookAt;
+
 void mouse_look_t::update(float deltaTime) {
 	auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
 	if (!contMaple) {
@@ -2562,27 +2557,186 @@ void mouse_look_t::update(float deltaTime) {
 		return;
 	}
 
-	if (lookEnabled) {
-		if (rotateEnabled) {
+	static bool last_b = false;
+	bool inspected = false;
+	if (!last_b && state->b) {
+		inspected = true;
+	}
+	last_b = state->b;
+
+	static bool last_x = false;
+	bool interacted = false;
+	if (!last_x && state->x) {
+		interacted = true;
+	}
+	last_x = state->x;
+
+	if (lookEnabled && pavo_state_t::getEnv()->canLook) {
+		if (rotateEnabled && pavo_state_t::getEnv()->canRotate) {
 			gameObjects[playerBodyIndex]->rotation.y += (float)state->joyx * rotateSpeed * deltaTime;
 			gameObject->rotation.x += (float)state->joyy * rotateSpeed * deltaTime;
 			gameObject->rotation.x = std::clamp(gameObject->rotation.x, -89.0f, 89.0f);
 		}
-	}
 
-	reactphysics3d::Vector3 cameraPos = {gameObject->ltw.pos.x, gameObject->ltw.pos.y, gameObject->ltw.pos.z};
-	reactphysics3d::Vector3 cameraAt = {gameObject->ltw.at.x, gameObject->ltw.at.y, gameObject->ltw.at.z};
-	reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*100);
+		if (pavo_state_t::getEnv()->onInteraction) {
+			if (inspected) {
+				auto oldHandler = pavo_state_t::getEnv()->onInteraction;
+				pavo_state_t::getEnv()->onInteraction = nullptr;
+				auto newHandler = oldHandler();
+
+				if (newHandler) {
+					pavo_state_t::getEnv()->onInteraction = newHandler;
+				}
+			}
+		} else {
+			bool Handled = false;
+			LookAtCheck<100.f> lookAtChecker;
+
+			reactphysics3d::Vector3 cameraPos = {gameObject->ltw.pos.x, gameObject->ltw.pos.y, gameObject->ltw.pos.z};
+			reactphysics3d::Vector3 cameraAt = {gameObject->ltw.at.x, gameObject->ltw.at.y, gameObject->ltw.at.z};
+			reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*100);
+			
+			// physics is one step behind here
+			physicsWorld->raycast(ray, &lookAtChecker);
+		
+			// lookAtChecker.finalize();
+
+			if (lookAtChecker.collider) {
+				pavo_interactable_t* ii2 = lookAtChecker.collider->gameObject->getComponent<pavo_interactable_t>();
+				if (ii2 && ii2->getInteractionRadius() >= lookAtChecker.distance) {
+					if (ii2LookAt != ii2)
+					{
+						if (ii2LookAt != nullptr)
+						{
+							ii2LookAt->lookAway();
+						}
+						ii2LookAt = ii2;
+						ii2LookAt->lookAt();
+					}
+
+					if (inspected) {
+						Handled = true;
+						ii2->focused();
+					} else if (interacted) {
+						ii2->interact();
+					}
+				} else if (ii2LookAt != nullptr) {
+					ii2LookAt->lookAway();
+					ii2LookAt = nullptr;
+				} else if (inspected) {
+					if (auto temp = lookAtChecker.collider->gameObject->getComponent<interactable_t>())
+					{
+						if (temp->interactionRadius >= lookAtChecker.distance)
+						{
+							if (inter != nullptr) {
+								// TODO
+								//messaging.Unfocused(inter);
+							}
+
+							inter = temp;
+							inter->focused();
+							Handled = true;
+						} 
+					} else if (inter != nullptr) {
+						if (inter != nullptr) {
+							// TODO
+							// messaging.Unfocused(inter);
+						}
+						
+						// TODO
+						// messaging.Unfocused(nullptr);
+					
+						inter = nullptr;
+					}
+				} else if (interacted) {
+					if (auto temp = lookAtChecker.collider->gameObject->getComponent<interactable_t>())
+					{
+						if (temp->interactionRadius >= lookAtChecker.distance)
+						{
+							if (inter != nullptr) {
+								// TODO
+								// messaging.Unfocused(inter);
+							}
+							inter = temp;
+							inter->interact();
+						}
+					}
+					else if (inter != nullptr)
+						{
+							if (inter != nullptr) {
+								// TODO
+								// messaging.Unfocused(inter);
+							}
+					
+							inter = nullptr;
+						}
+				}
+
+				if (!ii2) {
+					auto temp = lookAtChecker.collider->gameObject->getComponent<interactable_t>();
+					if (temp) {
+						// TODO
+						/*
+						if (messaging.Visible() || dialog.Visible() || password.Visible() || map.Visible())
+						{
+							textGameObject.SetActive(false);
+							lastInVisible = Time.time;
+						}
+						// TODO: This is also a hack
+						else if ((Time.time - lastInVisible) > 0.05f)
+						{
+							textGameObject.SetActive(true);
+						}
+						*/
+
+						if (temp->interactionRadius >= lookAtChecker.distance) {
+							// TODO
+							// if (messaging.busy != (object)temp)
+							// {
+							// 	ShowLookAtText(temp.LookAtMessage.Equals("") ? DefaultLookAtText : temp.LookAtMessage, temp);
+							// }
+							assert(temp->lookAtMessage);
+							// TODO
+							// lookAtMessage = temp->lookAtMessage ? temp->lookAtMessage : temp->defaultLookAtText;
+							lookAtMessage = temp->lookAtMessage;
+						} else {
+							// TODO
+							// HideLookAtText();
+							lookAtMessage = nullptr;
+						}
+					} else {
+						// TODO
+						lookAtMessage = nullptr;
+					}
+				} else {
+					// TODO
+					lookAtMessage = nullptr;
+				}
+ 			} else {
+				if (ii2LookAt != nullptr) {
+					ii2LookAt->lookAway();
+					ii2LookAt = nullptr;
+				}
+				lookAtMessage = nullptr;
+				// TODO
+				//  else if (CurrentLookAtInteractable != nullptr)
+				//  {
+				// 	 HideLookAtText();
+				//  }
+			}
+			if (inspected && !Handled)
+			{
+				// TODO
+				// Draw lazer beam!
+				// LazerBeam?.gameObject.SetActive(true);
+			}
+		}
+	}
 
 	#if defined(DEBUG_LOOKAT)
 	pointedGameObject = nullptr;
 	#endif
-	RaycastDumper<100.f> dumper;
-
-	// physics is one step behind here
-	physicsWorld->raycast(ray, &dumper);
-
-	dumper.showMessage();
+	
 
 	// TODO: move to correct place
 	if (playa) {
@@ -2653,7 +2807,6 @@ V3d ComputeAxisAlignedScale(const r_matrix_t* mtx) {
     return scale;
 }
 
-extern box_collider_t box_collider_531;
 void box_collider_t::update(float deltaTime) {
 	if (!rigidBody) {
 		reactphysics3d::Transform t;
@@ -2998,6 +3151,9 @@ void queueCoroutine(Task&& coroutine) {
 	coroutines.push_back(std::move(coroutine));
 }
 
+// TODO: move to some header
+void InitializeFlowMachines();
+
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -3029,7 +3185,8 @@ int main(int argc, const char** argv) {
     InitializeHierarchy(gameObjects);
 	InitializeComponents(gameObjects);
 	InitializeFonts();
-		
+	InitializeFlowMachines();
+
     unsigned currentStamp = 0;
 
 	#if defined(DC_SH4)
@@ -3100,41 +3257,6 @@ int main(int argc, const char** argv) {
 				if (state->ltrig > 64) {
 					deltaTime *= state->ltrig / 25.f;
 				}
-
-				static bool last_b = false;
-				if (!last_b && state->b) {
-					if (lookAtInteractablePavo) {
-						lookAtInteractablePavo->focused();
-					} else if (lookAtAction) {
-						lookAtActionIndex++;
-						if (!lookAtAction || lookAtAction[lookAtActionIndex] == nullptr) {
-							lookAtActionIndex = -1;
-							messageSpeaker = nullptr;
-							messageText = nullptr;
-						} else {
-							messageText = lookAtAction[lookAtActionIndex];
-						}
-					}
-				}
-				last_b = state->b;
-
-				static bool last_x = false;
-				if (!last_x && state->x) {
-					if (pavo_state_t::getEnv()->onInteraction) {
-						auto oldHandler = pavo_state_t::getEnv()->onInteraction;
-						pavo_state_t::getEnv()->onInteraction = nullptr;
-						auto newHandler = oldHandler();
-
-						if (newHandler) {
-							pavo_state_t::getEnv()->onInteraction = newHandler;
-						}
-					} else if (lookAtInteractablePavo) {
-						lookAtInteractablePavo->interact();
-					} else if (lookAtInteractable) {
-						lookAtInteractable->interact();
-					}
-				}
-				last_x = state->x;
             }
         }
         

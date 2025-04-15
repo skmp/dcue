@@ -65,7 +65,7 @@ struct pavo_unit_wait_for_interaction_t: pavo_unit_t {
         return noopInteraction;
     }
 
-    pavo_unit_wait_for_interaction_t(pavo_unit_t* onInteract, pavo_unit_t* onFocus, pavo_interactable_t* interactable, bool initial, const char* lookAtText, float interactionRadius): onInteract(onInteract), onFocus(onFocus), interactable(interactable), lookAtText(lookAtText) {
+    pavo_unit_wait_for_interaction_t(pavo_unit_t* onInteract, pavo_unit_t* onFocus, pavo_interactable_t* interactable, const char* lookAtText, float interactionRadius): onInteract(onInteract), onFocus(onFocus), interactable(interactable), lookAtText(lookAtText) {
         if (onInteract) {
             actions.onInteract = [this](pavo_interactable_t*) { 
                 pavo_state_t::pushEnv({.canMove = false, .canRotate = false, .onInteraction = noopInteraction}, &this->interactable->oldEnv);
@@ -84,10 +84,10 @@ struct pavo_unit_wait_for_interaction_t: pavo_unit_t {
         }
 
         actions.interactionRadius = interactionRadius;
+    }
 
-        if (initial) {
-            setCallbacks();
-        }
+    void initialize() {
+        setCallbacks();
     }
 };
 

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include "components.h"
+#include "pavo/pavo.h"
 
 namespace native {
     struct game_object_t;
@@ -17,11 +18,15 @@ struct interactable_t {
     const char** messages;
     float interactionRadius;
 
+    // runtime state
+    std::shared_ptr<pavo_flat_game_env_t> oldState;
+    unsigned inspectionCounter;
+
     void focused();
     void interact();
 
-    private:
     bool showMessage();
+    pavo_interaction_delegate_t onInteraction();
 };
 
 struct interaction_t {

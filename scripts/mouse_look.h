@@ -17,5 +17,8 @@ struct mouse_look_t {
 
     static constexpr float rotateSpeed = 45.f / 127;
 
+    static pavo_interactable_t* ii2LookAt;
+    static interactable_t* inter;
+
     void update(float deltaTime);
 };
