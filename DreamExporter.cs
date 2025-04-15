@@ -502,7 +502,8 @@ public class DreamExporter : MonoBehaviour
        { typeof(timedactiveinactive), "timed_activeinactive" },
        { typeof(Fadein), "fadein" },
        { typeof(ShowMessage), "show_message" },
-       { typeof(TeleporterTrigger), "teleporter_trigger" }
+       { typeof(TeleporterTrigger), "teleporter_trigger" },
+       { typeof(zoomout), "zoom_in_out" },
     };
 
     // scripts
@@ -669,6 +670,19 @@ public class DreamExporter : MonoBehaviour
         }
         GenerateComponentArray(ds, sb, "teleporter_trigger", ds.teleporterTriggers);
 
+        /////////////// zoom_in_out ///////////////
+        for (int zoomInOutNum = 0; zoomInOutNum < ds.zoomouts.Count; zoomInOutNum++)
+        {
+            var zoomInOut = ds.zoomouts[zoomInOutNum];
+            sb.Append($"zoom_in_out_t zoom_in_out_{zoomInOutNum} = {{ ");
+            sb.Append($"nullptr, {zoomInOut.Index}, {zoomInOut.blocking.ToString().ToLower()}, ");
+            sb.Append($"{ds.gameObjectIndex[zoomInOut.Camera]}, {ds.gameObjectIndex[zoomInOut.target]}, ");
+            sb.Append($"{zoomInOut.inactiveDuration}, {zoomInOut.zoomOutDuration}, {zoomInOut.zoomInDuration}, {zoomInOut.startingDistance}, ");
+            sb.Append($"{bools(zoomInOut.CanMove)}, {bools(zoomInOut.CanRotate)}, {bools(zoomInOut.CanLook)}, ");
+            sb.AppendLine("};");
+        }
+        GenerateComponentArray(ds, sb, "zoom_in_out", ds.zoomouts);
+
         File.WriteAllText("scripts.cpp", sb.ToString());
     }
 
@@ -701,6 +715,7 @@ public class DreamExporter : MonoBehaviour
         GenerateComponentDeclarations(ds, sb, "fadein", ds.fadeins, ds.fadeinIndex, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "show_message", ds.showMessages, ds.showMessageIndex, interactionsIndex);
         GenerateComponentDeclarations(ds, sb, "teleporter_trigger", ds.teleporterTriggers, ds.teleporterTriggerIndex, interactionsIndex);
+        GenerateComponentDeclarations(ds, sb, "zoom_in_out", ds.zoomouts, ds.zoomoutIndex, interactionsIndex);
 
         // interaction lists
         GenerateInteractionDeclarations(ds, sb, interactionsIndex);
@@ -1531,6 +1546,9 @@ public class DreamExporter : MonoBehaviour
         public List<TeleporterTrigger> teleporterTriggers;
         public Dictionary<TeleporterTrigger, int> teleporterTriggerIndex;
 
+        public List<zoomout> zoomouts;
+        public Dictionary<zoomout, int> zoomoutIndex;
+
         // Physics
         public List<Rigidbody> rigidbodies;
         public Dictionary<Rigidbody, int> rigidbodyIndex;
@@ -1688,6 +1706,9 @@ public class DreamExporter : MonoBehaviour
 
         ds.teleporterTriggers = GetSceneComponents<TeleporterTrigger>();
         ds.teleporterTriggerIndex = CreateComponentIndex(ds.teleporterTriggers);
+
+        ds.zoomouts = GetSceneComponents<zoomout>();
+        ds.zoomoutIndex = CreateComponentIndex(ds.zoomouts);
 
         // Physics
         ds.rigidbodies = GetSceneComponents<Rigidbody>();

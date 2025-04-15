@@ -2229,9 +2229,13 @@ void native::game_object_t::setActive(bool active) {
 }
 
 void proximity_interactable_t::update(float deltaTime) {
-	auto v = gameObjects[this->playaIndex]->position;
-	auto y = gameObject->position;
-	auto distance = sqrtf(v.x*y.x + v.y*y.y + v.z*y.z);
+	auto v = gameObjects[this->playaIndex]->ltw.pos;
+	auto y = gameObject->ltw.pos;
+	auto distance = sqrt(
+		(v.x - y.x) * (v.x - y.x) +
+		(v.y - y.y) * (v.y - y.y) +
+		(v.z - y.z) * (v.z - y.z)
+	);
 
 	if (distance < radius && !hasTriggered) {
 		hasTriggered = true;
@@ -2356,6 +2360,78 @@ void teleporter_trigger_t::interact() {
 		}
 		// TODO: Also handle LevelLoader here
 	}
+}
+
+void zoom_in_out_t::update(float deltaTime) {
+	switch(activeState) {
+		case 1: // zoom in
+			{
+				stateTime += deltaTime;
+				if (stateTime > zoomInDuration) {
+					stateTime = zoomInDuration;
+					activeState = 2;
+				}
+
+				reactphysics3d::Transform(
+					finalPosition  + (targetPosition - finalPosition) * (stateTime / zoomInDuration),
+					reactphysics3d::Quaternion::slerp(finalRotation, targetRotation, (stateTime / zoomInDuration))
+				).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
+				
+				if (activeState == 2) {
+					stateTime = 0;
+				}
+			}
+			break;
+		case 2: // inactive
+			{
+				stateTime += deltaTime;
+				if (stateTime > inactiveDuration) {
+					stateTime = 0;
+					activeState = 3;
+				}
+
+				reactphysics3d::Transform(
+					targetPosition,
+					targetRotation
+				).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
+			}
+			break;
+		case 3: // zoom out
+			{
+				stateTime += deltaTime;
+				if (stateTime > zoomOutDuration) {
+					stateTime = zoomOutDuration;
+					activeState = 0;
+				}
+				reactphysics3d::Transform(
+					targetPosition  + (finalPosition - targetPosition) * (stateTime / zoomOutDuration),
+					reactphysics3d::Quaternion::slerp(targetRotation, finalRotation, (stateTime / zoomOutDuration))
+				).getOpenGLMatrix(&gameObjects[cameraIndex]->ltw.m00);
+			}
+			break;
+		case 0:
+			// not triggered
+		default:
+			;
+	}
+}
+
+void zoom_in_out_t::interact() {
+	reactphysics3d::Transform targetTransform;
+	targetTransform.setFromOpenGL(&gameObjects[targetIndex]->ltw.m00);
+	targetPosition = targetTransform.getPosition();
+	targetRotation = targetTransform.getOrientation();
+
+	reactphysics3d::Transform finalTransform;
+	finalTransform.setFromOpenGL(&gameObjects[cameraIndex]->ltw.m00);
+	finalPosition = finalTransform.getPosition();
+	finalRotation = finalTransform.getOrientation();
+
+	targetPosition = targetPosition  + (finalPosition - targetPosition) * startingDistance;
+	targetRotation = reactphysics3d::Quaternion::slerp(targetRotation, finalRotation, startingDistance);
+
+	activeState = 1;
+	stateTime = 0;
 }
 
 
@@ -3009,6 +3085,13 @@ int main(int argc, const char** argv) {
 				(*show_message)->update(deltaTime);
 			}
 		}
+		for (auto teleporter_trigger = teleporter_triggers; *teleporter_trigger; teleporter_trigger++) {
+			if ((*teleporter_trigger)->gameObject->isActive()) {
+				// (*teleporter_trigger)->update(deltaTime);
+			}
+		}
+
+		// ugly hack: zoom out is after position set
 
         for (auto go: gameObjects) {
 			if (!go->isActive()) {
@@ -3067,6 +3150,13 @@ int main(int argc, const char** argv) {
             mat_apply((matrix_t*)&scale_mtx);
             mat_store((matrix_t*)&go->ltw);
         }
+
+		// zoom in out interactions
+		for (auto zoom_in_out = zoom_in_outs; *zoom_in_out; zoom_in_out++) {
+			if ((*zoom_in_out)->gameObject->isActive()) {
+				(*zoom_in_out)->update(deltaTime);
+			}
+		}
 
 		// physics (these use ltw)
 		for (auto box_collider = box_colliders; *box_collider; box_collider++) {

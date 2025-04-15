@@ -12,6 +12,7 @@
 #include "interactions/fadein.h"
 #include "interactions/show_message.h"
 #include "interactions/teleporter_trigger.h"
+#include "interactions/zoom_in_out.h"
 
 // scripts
 extern proximity_interactable_t* proximity_interactables[];
@@ -25,3 +26,5 @@ extern game_object_activeinactive_t* game_object_activeinactives[];
 extern timed_activeinactive_t* timed_activeinactives[];
 extern fadein_t* fadeins[];
 extern show_message_t* show_messages[];
+extern teleporter_trigger_t* teleporter_triggers[];
+extern zoom_in_out_t* zoom_in_outs[];

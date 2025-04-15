@@ -23,6 +23,7 @@ struct timed_activeinactive_t;
 struct fadein_t;
 struct show_message_t;
 struct teleporter_trigger_t;
+struct zoom_in_out_t;
 
 // interaction list
 struct interaction_t;
@@ -58,6 +59,7 @@ enum component_type_t {
     ct_fadein,
     ct_show_message,
     ct_teleporter_trigger,
+    ct_zoom_in_out,
 
     ct_eol = -1
 };
@@ -88,6 +90,7 @@ struct component_t {
         fadein_t** fadeins;
         show_message_t** showMessages;
         teleporter_trigger_t** teleporterTriggers;
+        zoom_in_out_t** zoomInOuts;
 
         // interactions list
         interaction_t** interactions;
