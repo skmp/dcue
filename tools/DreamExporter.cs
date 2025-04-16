@@ -2411,7 +2411,7 @@ public class DreamExporter : MonoBehaviour
             foreach (GameObject go in ds.gameObjects)
             {
                 // Write active state (bool)
-                writer.Write(go.activeInHierarchy);
+                writer.Write(go.activeSelf);
 
                 // Write localToWorldMatrix (16 floats)
                 Matrix4x4 mtx = go.transform.localToWorldMatrix;
