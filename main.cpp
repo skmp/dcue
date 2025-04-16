@@ -2262,6 +2262,8 @@ bool interactable_t::showMessage() {
 			inspectionCounter = 0;
 			// TODO
 			//messaging.Unfocused(this);
+			messageSpeaker = nullptr;
+			messageText = nullptr;
 			return false;
 		} else {
 			const char* message = messages[inspectionCounter++];
@@ -2493,7 +2495,25 @@ void cant_move_t::interact() {
 // TODO: manage well known objects in the scene better
 game_object_t* playa;
 
+
+template<float maxDistance>
+struct GroundRaycastCallback: public reactphysics3d::RaycastCallback {
+	float distance = maxDistance;
+
+	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
+		auto collider = (box_collider_t*)raycastInfo.collider->getUserData();
+		auto distance = raycastInfo.hitFraction * maxDistance;
+		if (collider->gameObject->isActive() && distance > 0.5f /* this is a hack */) {
+			this->distance = distance;
+			return raycastInfo.hitFraction;
+		} else {
+			return -1;
+		}
+	}
+};
+
 void player_movement_t::update(float deltaTime) {
+	// TODO: well known objects
 	playa = gameObject;
 
 	if (!canMove || !pavo_state_t::getEnv()->canMove) {
@@ -2508,6 +2528,7 @@ void player_movement_t::update(float deltaTime) {
 	if (!state) {
 		return;
 	}
+
 	float movement = 0;
 	if (state->a) {
 		movement = 1;
@@ -2516,13 +2537,45 @@ void player_movement_t::update(float deltaTime) {
 		movement = -0.7f;
 	}
 
-	movement *= speed * deltaTime;
-
+	if (movement != 0) {
+		GroundRaycastCallback<10.f> moveCheck;
 	
-	float movementX = sin(gameObject->rotation.y * deg2rad) * movement;
-	float movementZ = cos(gameObject->rotation.y * deg2rad) * movement;
-	gameObject->position.x += movementX;
-	gameObject->position.z += movementZ;
+		reactphysics3d::Vector3 playaPos = {playa->ltw.pos.x, playa->ltw.pos.y + 3.8f/2, playa->ltw.pos.z}; // TODO: the 3.8f should come from the character controller
+		reactphysics3d::Vector3 forwardAt = { playa->ltw.at.x, playa->ltw.at.y, playa->ltw.at.z};
+	
+		if (movement < 0) {
+			forwardAt.z = -forwardAt.z;
+		}
+	
+		reactphysics3d::Ray ray(playaPos, playaPos + forwardAt * moveCheck.distance);
+	
+		physicsWorld->raycast(ray, &moveCheck);
+	
+		if (moveCheck.distance > 7) {
+			movement *= speed * deltaTime;
+	
+		
+			float movementX = sin(gameObject->rotation.y * deg2rad) * movement;
+			float movementZ = cos(gameObject->rotation.y * deg2rad) * movement;
+			gameObject->position.x += movementX;
+			gameObject->position.z += movementZ;
+		}
+	}
+
+
+	// TODO: move to a better place
+	{
+		GroundRaycastCallback<10.f> groundCheck;
+		
+		reactphysics3d::Vector3 playaPos = {playa->ltw.pos.x, playa->ltw.pos.y, playa->ltw.pos.z};
+		reactphysics3d::Vector3 downAt = { 0, -1, 0 };
+
+		reactphysics3d::Ray ray(playaPos, playaPos + downAt*groundCheck.distance);
+
+		physicsWorld->raycast(ray, &groundCheck);
+	
+		playa->position.y -= groundCheck.distance - 0.5f - 3.8f/2; // TODO: the 3.8f should come from the character controller
+	}
 }
 
 template<float maxDistance>
@@ -2531,31 +2584,18 @@ struct LookAtCheck: public reactphysics3d::RaycastCallback {
 	float distance = 1000;
 
 	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
-		auto collider2 = (box_collider_t*)raycastInfo.collider->getUserData();
-		if (collider2->gameObject->isActive()) {
-			collider = collider2;
-			distance = raycastInfo.hitFraction * maxDistance;
-			return raycastInfo.hitFraction;
-		} else {
-			return -1;
-		}
-	}
-};
-
-template<float maxDistance>
-struct GroundRaycastCallback: public reactphysics3d::RaycastCallback {
-	float distance;
-
-	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
 		auto collider = (box_collider_t*)raycastInfo.collider->getUserData();
-		if (collider->gameObject->isActive()) {
-			distance = raycastInfo.hitFraction * maxDistance;
+		float distance = raycastInfo.hitFraction * maxDistance;
+		if (collider->gameObject->isActive() && distance > 0.5f /* this is a hack */) {
+			this->collider = collider;
+			this->distance = distance;
 			return raycastInfo.hitFraction;
 		} else {
 			return -1;
 		}
 	}
 };
+
 
 interactable_t* mouse_look_t::inter;
 pavo_interactable_t* mouse_look_t::ii2LookAt;
@@ -2644,6 +2684,8 @@ void mouse_look_t::update(float deltaTime) {
 							if (inter != nullptr) {
 								// TODO
 								//messaging.Unfocused(inter);
+								messageSpeaker = nullptr;
+								messageText = nullptr;
 							}
 
 							inter = temp;
@@ -2654,10 +2696,14 @@ void mouse_look_t::update(float deltaTime) {
 						if (inter != nullptr) {
 							// TODO
 							// messaging.Unfocused(inter);
+							messageSpeaker = nullptr;
+							messageText = nullptr;
 						}
 						
 						// TODO
 						// messaging.Unfocused(nullptr);
+						messageSpeaker = nullptr;
+						messageText = nullptr;
 					
 						inter = nullptr;
 					}
@@ -2669,6 +2715,8 @@ void mouse_look_t::update(float deltaTime) {
 							if (inter != nullptr) {
 								// TODO
 								// messaging.Unfocused(inter);
+								messageSpeaker = nullptr;
+								messageText = nullptr;
 							}
 							inter = temp;
 							inter->interact();
@@ -2679,6 +2727,8 @@ void mouse_look_t::update(float deltaTime) {
 							if (inter != nullptr) {
 								// TODO
 								// messaging.Unfocused(inter);
+								messageSpeaker = nullptr;
+								messageText = nullptr;
 							}
 					
 							inter = nullptr;
@@ -2750,22 +2800,6 @@ void mouse_look_t::update(float deltaTime) {
 	#if defined(DEBUG_LOOKAT)
 	pointedGameObject = nullptr;
 	#endif
-	
-
-	// TODO: move to correct place
-	if (playa) {
-		GroundRaycastCallback<10.f> groundCheck;
-		
-		reactphysics3d::Vector3 playaPos = {playa->ltw.pos.x, playa->ltw.pos.y, playa->ltw.pos.z};
-		reactphysics3d::Vector3 downAt = { 0, -1, 0 };
-
-		reactphysics3d::Ray ray(playaPos, playaPos + downAt*10);
-
-		physicsWorld->raycast(ray, &groundCheck);
-		playa->position.y -= groundCheck.distance - 0.5f - 3.8f/2; // TODO: the 3.8f should come from the character controller
-	}
-
-
 }
 
 
@@ -3168,6 +3202,91 @@ void queueCoroutine(Task&& coroutine) {
 // TODO: move to some header
 void InitializeFlowMachines();
 
+void positionUpdate() {
+	for (auto go: gameObjects) {
+		if (!go->isActive()) {
+			continue;
+		}
+
+		r_matrix_t pos_mtx = {
+			1, 0, 0, 0,
+			0, 1, 0, 0,
+			0, 0, 1, 0,
+			go->position.x, go->position.y, go->position.z, 1
+		};
+
+		r_matrix_t rot_mtx_x = {
+			1, 0, 0, 0,
+			0, cosf(go->rotation.x*deg2rad), sinf(go->rotation.x*deg2rad), 0,
+			0, -sinf(go->rotation.x*deg2rad), cosf(go->rotation.x*deg2rad), 0,
+			0, 0, 0, 1
+		};
+		r_matrix_t rot_mtx_y = {
+			cosf(go->rotation.y*deg2rad), 0, -sinf(go->rotation.y*deg2rad), 0,
+			0, 1, 0, 0,
+			sinf(go->rotation.y*deg2rad), 0, cosf(go->rotation.y*deg2rad), 0,
+			0, 0, 0, 1
+		};
+		r_matrix_t rot_mtx_z = {
+			cosf(go->rotation.z*deg2rad), sinf(go->rotation.z*deg2rad), 0, 0,
+			-sinf(go->rotation.z*deg2rad), cosf(go->rotation.z*deg2rad), 0, 0,
+			0, 0, 1, 0,
+			0, 0, 0, 1
+		};
+		r_matrix_t scale_mtx = {
+			go->scale.x, 0, 0, 0,
+			0, go->scale.y, 0, 0,
+			0, 0, go->scale.z, 0,
+			0, 0, 0, 1
+		};
+		static r_matrix_t identity_mtx = {
+			1, 0, 0, 0,
+			0, 1, 0, 0,
+			0, 0, 1, 0,
+			0, 0, 0, 1
+		};
+
+
+		if (go->parent) {
+			mat_load((matrix_t*)&go->parent->ltw);
+		} else {
+			mat_load((matrix_t*)&identity_mtx);
+		}
+
+		mat_apply((matrix_t*)&pos_mtx);
+		mat_apply((matrix_t*)&rot_mtx_y);
+		mat_apply((matrix_t*)&rot_mtx_x);
+		mat_apply((matrix_t*)&rot_mtx_z);
+		mat_apply((matrix_t*)&scale_mtx);
+		mat_store((matrix_t*)&go->ltw);
+	}
+}
+
+void physicsUpdate(float deltaTime) {
+	// physics (these use ltw)
+	for (auto box_collider = box_colliders; *box_collider; box_collider++) {
+		if ((*box_collider)->gameObject->isActive()) {
+			(*box_collider)->update(deltaTime);
+		}
+	}
+	for (auto sphere_collider = sphere_colliders; *sphere_collider; sphere_collider++) {
+		if ((*sphere_collider)->gameObject->isActive()) {
+			(*sphere_collider)->update(deltaTime);
+		}
+	}
+	for (auto capsule_collider = capsule_colliders; *capsule_collider; capsule_collider++) {
+		if ((*capsule_collider)->gameObject->isActive()) {
+			(*capsule_collider)->update(deltaTime);
+		}
+	}
+	for (auto mesh_collider = mesh_colliders; *mesh_collider; mesh_collider++) {
+		if ((*mesh_collider)->gameObject->isActive()) {
+			(*mesh_collider)->update(deltaTime);
+		}
+	}
+	
+	physicsWorld->update(deltaTime);
+}
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -3248,6 +3367,10 @@ int main(int argc, const char** argv) {
 	//debugRenderer.setIsDebugItemDisplayed(reactphysics3d::DebugRenderer::DebugItem::COLLISION_SHAPE, true);
 	#endif
 
+	// initial positions
+	positionUpdate();
+	physicsUpdate(0.01);
+
     auto tp_last_frame = std::chrono::system_clock::now() - std::chrono::milliseconds(16);
     for(;;) {
         currentStamp++;
@@ -3293,14 +3416,14 @@ int main(int argc, const char** argv) {
 				(*proximity_interactable)->update(deltaTime);
 			}
 		}
-		for (auto player_movement = player_movements; *player_movement; player_movement++) {
-			if ((*player_movement)->gameObject->isActive()) {
-				(*player_movement)->update(deltaTime);
-			}
-		}
 		for (auto mouse_look = mouse_looks; *mouse_look; mouse_look++) {
 			if ((*mouse_look)->gameObject->isActive()) {
 				(*mouse_look)->update(deltaTime);
+			}
+		}
+		for (auto player_movement = player_movements; *player_movement; player_movement++) {
+			if ((*player_movement)->gameObject->isActive()) {
+				(*player_movement)->update(deltaTime);
 			}
 		}
 		for (auto teleporter = teleporters; *teleporter; teleporter++) {
@@ -3345,63 +3468,7 @@ int main(int argc, const char** argv) {
 
 		// ugly hack: coroutines are after position set
 
-        for (auto go: gameObjects) {
-			if (!go->isActive()) {
-				continue;
-			}
-
-            r_matrix_t pos_mtx = {
-                1, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 0, 1, 0,
-                go->position.x, go->position.y, go->position.z, 1
-            };
-
-            r_matrix_t rot_mtx_x = {
-                1, 0, 0, 0,
-                0, cosf(go->rotation.x*deg2rad), sinf(go->rotation.x*deg2rad), 0,
-                0, -sinf(go->rotation.x*deg2rad), cosf(go->rotation.x*deg2rad), 0,
-                0, 0, 0, 1
-            };
-            r_matrix_t rot_mtx_y = {
-                cosf(go->rotation.y*deg2rad), 0, -sinf(go->rotation.y*deg2rad), 0,
-                0, 1, 0, 0,
-                sinf(go->rotation.y*deg2rad), 0, cosf(go->rotation.y*deg2rad), 0,
-                0, 0, 0, 1
-            };
-            r_matrix_t rot_mtx_z = {
-                cosf(go->rotation.z*deg2rad), sinf(go->rotation.z*deg2rad), 0, 0,
-                -sinf(go->rotation.z*deg2rad), cosf(go->rotation.z*deg2rad), 0, 0,
-                0, 0, 1, 0,
-                0, 0, 0, 1
-            };
-            r_matrix_t scale_mtx = {
-                go->scale.x, 0, 0, 0,
-                0, go->scale.y, 0, 0,
-                0, 0, go->scale.z, 0,
-                0, 0, 0, 1
-            };
-            static r_matrix_t identity_mtx = {
-                1, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 0, 1, 0,
-                0, 0, 0, 1
-            };
-
-
-            if (go->parent) {
-                mat_load((matrix_t*)&go->parent->ltw);
-            } else {
-                mat_load((matrix_t*)&identity_mtx);
-            }
-
-            mat_apply((matrix_t*)&pos_mtx);
-            mat_apply((matrix_t*)&rot_mtx_y);
-            mat_apply((matrix_t*)&rot_mtx_x);
-            mat_apply((matrix_t*)&rot_mtx_z);
-            mat_apply((matrix_t*)&scale_mtx);
-            mat_store((matrix_t*)&go->ltw);
-        }
+		positionUpdate();
 
 		// coroutines
 		for (auto coroutine = coroutines.begin(); coroutine != coroutines.end(); ) {
@@ -3413,29 +3480,7 @@ int main(int argc, const char** argv) {
 			}
 		}
 
-		// physics (these use ltw)
-		for (auto box_collider = box_colliders; *box_collider; box_collider++) {
-			if ((*box_collider)->gameObject->isActive()) {
-				(*box_collider)->update(deltaTime);
-			}
-		}
-		for (auto sphere_collider = sphere_colliders; *sphere_collider; sphere_collider++) {
-			if ((*sphere_collider)->gameObject->isActive()) {
-				(*sphere_collider)->update(deltaTime);
-			}
-		}
-		for (auto capsule_collider = capsule_colliders; *capsule_collider; capsule_collider++) {
-			if ((*capsule_collider)->gameObject->isActive()) {
-				(*capsule_collider)->update(deltaTime);
-			}
-		}
-		for (auto mesh_collider = mesh_colliders; *mesh_collider; mesh_collider++) {
-			if ((*mesh_collider)->gameObject->isActive()) {
-				(*mesh_collider)->update(deltaTime);
-			}
-		}
-		
-		physicsWorld->update(deltaTime);
+		physicsUpdate(deltaTime);
 
 		// find current camera
 		camera_t* currentCamera = nullptr;
@@ -3488,7 +3533,7 @@ int main(int argc, const char** argv) {
 			}
 			drawTextLeftBottom(&fonts_0, 15, 40, 440, messageText, 1, 1, 1, 1);
 		} else if (lookAtMessage) {
-			drawTextCentered(&fonts_19, 24, 320, 240, lookAtMessage, 1, 1, 0.1, 0.1);
+			drawTextCentered(&fonts_19, 40, 320, 240, lookAtMessage, 1, 1, 0.1, 0.1);
 		}
 		#if defined(DEBUG_PHYSICS)
 		pvr_poly_hdr_t hdr;
