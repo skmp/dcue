@@ -764,7 +764,7 @@ public class DreamExporter : MonoBehaviour
             {
                 sb.Append($"ct_{component}, {{ .{typenameToVarname(component)}s = {component}s_{gameObjectNum} }} , ");
             }
-            sb.AppendLine("ct_eol };");
+            sb.AppendLine($"ct_eol }}; // {gameObject.name}");
         }
     }
 
