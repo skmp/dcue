@@ -36,21 +36,11 @@ RP3D_OBJECTS = \
 	    ../vendor/reactphysics3d/src/collision/ConvexMesh.o \
 	    ../vendor/reactphysics3d/src/collision/HalfEdgeStructure.o \
 	    ../vendor/reactphysics3d/src/collision/ContactManifold.o \
-	    ../vendor/reactphysics3d/src/constraint/BallAndSocketJoint.o \
-	    ../vendor/reactphysics3d/src/constraint/ContactPoint.o \
-	    ../vendor/reactphysics3d/src/constraint/FixedJoint.o \
-	    ../vendor/reactphysics3d/src/constraint/HingeJoint.o \
-	    ../vendor/reactphysics3d/src/constraint/Joint.o \
-	    ../vendor/reactphysics3d/src/constraint/SliderJoint.o \
 	    ../vendor/reactphysics3d/src/engine/PhysicsCommon.o \
-	    ../vendor/reactphysics3d/src/systems/ConstraintSolverSystem.o \
-	    ../vendor/reactphysics3d/src/systems/ContactSolverSystem.o \
+		../vendor/reactphysics3d/src/constraint/ContactPoint.o \
+		../vendor/reactphysics3d/src/systems/ContactSolverSystem.o \
 	    ../vendor/reactphysics3d/src/systems/DynamicsSystem.o \
 	    ../vendor/reactphysics3d/src/systems/CollisionDetectionSystem.o \
-	    ../vendor/reactphysics3d/src/systems/SolveBallAndSocketJointSystem.o \
-	    ../vendor/reactphysics3d/src/systems/SolveFixedJointSystem.o \
-	    ../vendor/reactphysics3d/src/systems/SolveHingeJointSystem.o \
-	    ../vendor/reactphysics3d/src/systems/SolveSliderJointSystem.o \
 	    ../vendor/reactphysics3d/src/engine/PhysicsWorld.o \
 	    ../vendor/reactphysics3d/src/engine/Island.o \
 	    ../vendor/reactphysics3d/src/engine/Material.o \
@@ -63,11 +53,6 @@ RP3D_OBJECTS = \
 	    ../vendor/reactphysics3d/src/components/RigidBodyComponents.o \
 	    ../vendor/reactphysics3d/src/components/TransformComponents.o \
 	    ../vendor/reactphysics3d/src/components/ColliderComponents.o \
-	    ../vendor/reactphysics3d/src/components/JointComponents.o \
-	    ../vendor/reactphysics3d/src/components/BallAndSocketJointComponents.o \
-	    ../vendor/reactphysics3d/src/components/FixedJointComponents.o \
-	    ../vendor/reactphysics3d/src/components/HingeJointComponents.o \
-	    ../vendor/reactphysics3d/src/components/SliderJointComponents.o \
 	    ../vendor/reactphysics3d/src/collision/CollisionCallback.o \
 	    ../vendor/reactphysics3d/src/collision/OverlapCallback.o \
 	    ../vendor/reactphysics3d/src/mathematics/Matrix2x2.o \

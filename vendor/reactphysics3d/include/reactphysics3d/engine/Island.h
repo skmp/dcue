@@ -25,6 +25,9 @@
 
 #ifndef REACTPHYSICS3D_ISLAND_H
 #define REACTPHYSICS3D_ISLAND_H
+#include <reactphysics3d/configuration.h>
+#include <reactphysics3d/memory/MemoryManager.h>
+#include <reactphysics3d/body/RigidBody.h>
 
 // Libraries
 #include <reactphysics3d/constraint/Joint.h>
@@ -81,8 +84,6 @@ class Island {
         /// Add a contact manifold into the island
         void addContactManifold(ContactManifold* contactManifold);
 
-        /// Add a joint into the island
-        void addJoint(Joint* joint);
 
         /// Return the number of bodies in the island
         uint32 getNbBodies() const;
@@ -90,8 +91,6 @@ class Island {
         /// Return the number of contact manifolds in the island
         uint32 getNbContactManifolds() const;
 
-        /// Return the number of joints in the island
-        uint32 getNbJoints() const;
 
         /// Return a pointer to the array of bodies
         RigidBody** getBodies();

@@ -60,17 +60,12 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
               : mMemoryManager(memoryManager), mConfig(worldSettings), mEntityManager(mMemoryManager.getHeapAllocator()), mDebugRenderer(mMemoryManager.getHeapAllocator()),
                 mIsDebugRenderingEnabled(false), mIsGravityEnabled(true), mBodyComponents(mMemoryManager.getHeapAllocator()), mRigidBodyComponents(mMemoryManager.getHeapAllocator()),
                 mTransformComponents(mMemoryManager.getHeapAllocator()), mCollidersComponents(mMemoryManager.getHeapAllocator()),
-                mJointsComponents(mMemoryManager.getHeapAllocator()), mBallAndSocketJointsComponents(mMemoryManager.getHeapAllocator()),
-                mFixedJointsComponents(mMemoryManager.getHeapAllocator()), mHingeJointsComponents(mMemoryManager.getHeapAllocator()),
-                mSliderJointsComponents(mMemoryManager.getHeapAllocator()), mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
-                                        mMemoryManager, physicsCommon.mTriangleShapeHalfEdgeStructure),
+                mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
+                    mMemoryManager, physicsCommon.mTriangleShapeHalfEdgeStructure),
                 mCollisionBodies(mMemoryManager.getHeapAllocator()), mEventListener(nullptr),
                 mName(worldSettings.worldName),  mIslands(mMemoryManager.getSingleFrameAllocator()), mProcessContactPairsOrderIslands(mMemoryManager.getSingleFrameAllocator()),
                 mContactSolverSystem(mMemoryManager, *this, mIslands, mBodyComponents, mRigidBodyComponents,
                                mCollidersComponents, mConfig.restitutionVelocityThreshold),
-                mConstraintSolverSystem(*this, mIslands, mRigidBodyComponents, mTransformComponents, mJointsComponents,
-                                        mBallAndSocketJointsComponents, mFixedJointsComponents, mHingeJointsComponents,
-                                        mSliderJointsComponents),
                 mDynamicsSystem(*this, mBodyComponents, mRigidBodyComponents, mTransformComponents, mCollidersComponents, mIsGravityEnabled, mConfig.gravity),
                 mNbVelocitySolverIterations(mConfig.defaultVelocitySolverNbIterations),
                 mNbPositionSolverIterations(mConfig.defaultPositionSolverNbIterations), 
@@ -111,11 +106,6 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
     mCollidersComponents.init();
     mBodyComponents.init();
     mRigidBodyComponents.init();
-    mJointsComponents.init();
-    mBallAndSocketJointsComponents.init();
-    mFixedJointsComponents.init();
-    mSliderJointsComponents.init();
-    mHingeJointsComponents.init();
 
     RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::World,
              "Physics World: Physics world " + mName + " has been created",  __FILE__, __LINE__);
@@ -141,10 +131,6 @@ PhysicsWorld::~PhysicsWorld() {
 
 #endif
 
-    // Destroy all the joints that have not been removed
-    for (uint32 i=0; i < mJointsComponents.getNbComponents(); i++) {
-        destroyJoint(mJointsComponents.mJoints[i]);
-    }
 
     // Destroy all the rigid bodies that have not been removed
     uint32 i = static_cast<uint32>(mRigidBodies.size());
@@ -153,7 +139,6 @@ PhysicsWorld::~PhysicsWorld() {
         destroyRigidBody(mRigidBodies[i]);
     }
 
-    assert(mJointsComponents.getNbComponents() == 0);
     assert(mRigidBodies.size() == 0);
     assert(mCollisionBodies.size() == 0);
     assert(mBodyComponents.getNbComponents() == 0);
@@ -185,25 +170,6 @@ void PhysicsWorld::setBodyDisabled(Entity bodyEntity, bool isDisabled) {
     }
 }
 
-// Notify the world whether a joint is disabled or not
-void PhysicsWorld::setJointDisabled(Entity jointEntity, bool isDisabled) {
-
-    if (isDisabled == mJointsComponents.getIsEntityDisabled(jointEntity)) return;
-
-    mJointsComponents.setIsEntityDisabled(jointEntity, isDisabled);
-    if (mBallAndSocketJointsComponents.hasComponent(jointEntity)) {
-        mBallAndSocketJointsComponents.setIsEntityDisabled(jointEntity, isDisabled);
-    }
-    if (mFixedJointsComponents.hasComponent(jointEntity)) {
-        mFixedJointsComponents.setIsEntityDisabled(jointEntity, isDisabled);
-    }
-    if (mHingeJointsComponents.hasComponent(jointEntity)) {
-        mHingeJointsComponents.setIsEntityDisabled(jointEntity, isDisabled);
-    }
-    if (mSliderJointsComponents.hasComponent(jointEntity)) {
-        mSliderJointsComponents.setIsEntityDisabled(jointEntity, isDisabled);
-    }
-}
 
 // Return true if two bodies overlap
 /// Use this method if you are not interested in contacts but if you simply want to know
@@ -267,7 +233,7 @@ void PhysicsWorld::update(decimal timeStep) {
     updateBodiesInverseWorldInertiaTensors();
 
     // Enable or disable the joints
-    enableDisableJoints();
+    // enableDisableJoints();
 
     // Integrate the velocities
     mDynamicsSystem.integrateRigidBodiesVelocities(timeStep);
@@ -278,8 +244,6 @@ void PhysicsWorld::update(decimal timeStep) {
     // Integrate the position and orientation of each body
     mDynamicsSystem.integrateRigidBodiesPositions(timeStep, mContactSolverSystem.isSplitImpulseActive());
 
-    // Solve the position correction for constraints
-    solvePositionCorrection();
 
     // Update the state (positions and velocities) of the bodies
     mDynamicsSystem.updateBodiesState();
@@ -311,7 +275,7 @@ void PhysicsWorld::updateBodiesInverseWorldInertiaTensors() {
 
     uint32 nbComponents = mRigidBodyComponents.getNbEnabledComponents();
     for (uint32 i=0; i < nbComponents; i++) {
-        const Matrix3x3 orientation = mTransformComponents.getTransform(mRigidBodyComponents.mBodiesEntities[i]).getOrientation().getMatrix();
+        const Matrix3x3 orientation = mTransformComponents.getTransform(mRigidBodyComponents.mBodiesEntities[i]).getOrientation();
 
         RigidBody::computeWorldInertiaTensorInverse(orientation, mRigidBodyComponents.mInverseInertiaTensorsLocal[i], mRigidBodyComponents.mInverseInertiaTensorsWorld[i]);
     }
@@ -327,16 +291,6 @@ void PhysicsWorld::solveContactsAndConstraints(decimal timeStep) {
     // Initialize the contact solver
     mContactSolverSystem.init(mCollisionDetection.mCurrentContactManifolds, mCollisionDetection.mCurrentContactPoints, timeStep);
 
-    // Initialize the constraint solver
-    mConstraintSolverSystem.initialize(timeStep);
-
-    // For each iteration of the velocity solver
-    for (uint32 i=0; i<mNbVelocitySolverIterations; i++) {
-
-        mConstraintSolverSystem.solveVelocityConstraints();
-
-        mContactSolverSystem.solve();
-    }
 
     mContactSolverSystem.storeImpulses();
 
@@ -344,54 +298,6 @@ void PhysicsWorld::solveContactsAndConstraints(decimal timeStep) {
     mContactSolverSystem.reset();
 }
 
-// Solve the position error correction of the constraints
-void PhysicsWorld::solvePositionCorrection() {
-
-    RP3D_PROFILE("PhysicsWorld::solvePositionCorrection()", mProfiler);
-
-    // ---------- Solve the position error correction for the constraints ---------- //
-
-    // For each iteration of the position (error correction) solver
-    for (uint32 i=0; i<mNbPositionSolverIterations; i++) {
-
-        // Solve the position constraints
-        mConstraintSolverSystem.solvePositionConstraints();
-    }
-}
-
-// Enable or disable the joints
-void PhysicsWorld::enableDisableJoints() {
-
-    const uint32 nbJointComponents = mJointsComponents.getNbComponents();
-
-    Array<Entity> jointsEntites(mMemoryManager.getHeapAllocator(), nbJointComponents);
-
-    // Get all the joints entities
-    for (uint32 i = 0; i < nbJointComponents; i++) {
-        jointsEntites.add(mJointsComponents.mJointEntities[i]);
-    }
-
-    // For each joint
-    for (uint32 i = 0; i < nbJointComponents; i++) {
-
-        uint32 jointEntityIndex = mJointsComponents.getEntityIndex(jointsEntites[i]);
-
-        Entity body1 = mJointsComponents.mBody1Entities[jointEntityIndex];
-        Entity body2 = mJointsComponents.mBody2Entities[jointEntityIndex];
-
-        // If both bodies of the joint are disabled
-        if (mBodyComponents.getIsEntityDisabled(body1) && mBodyComponents.getIsEntityDisabled(body2)) {
-
-            // Disable the joint
-            setJointDisabled(jointsEntites[i], true);
-        }
-        else {
-
-            // Enable the joint
-            setJointDisabled(jointsEntites[i], false);
-        }
-    }
-}
 
 // Create a rigid body into the physics world
 /**
@@ -455,9 +361,7 @@ void PhysicsWorld::destroyRigidBody(RigidBody* rigidBody) {
 
     // Destroy all the joints in which the rigid body to be destroyed is involved
     const Array<Entity>& joints = mRigidBodyComponents.getJoints(rigidBody->getEntity());
-    while (joints.size() > 0) {
-        destroyJoint(mJointsComponents.getJoint(joints[0]));
-    }
+    assert(joints.size() == 0);
 
     // Destroy the corresponding entity and its components
     mBodyComponents.removeComponent(rigidBody->getEntity());
@@ -473,186 +377,6 @@ void PhysicsWorld::destroyRigidBody(RigidBody* rigidBody) {
 
     // Free the object from the memory allocator
     mMemoryManager.release(MemoryManager::AllocationType::Pool, rigidBody, sizeof(RigidBody));
-}
-
-// Create a joint between two bodies in the world and return a pointer to the new joint
-/**
- * @param jointInfo The information that is necessary to create the joint
- * @return A pointer to the joint that has been created in the world
- */
-Joint* PhysicsWorld::createJoint(const JointInfo& jointInfo) {
-
-    // Create a new entity for the joint
-    Entity entity = mEntityManager.createEntity();
-
-    Joint* newJoint = nullptr;
-
-    const bool isJointDisabled = mRigidBodyComponents.getIsEntityDisabled(jointInfo.body1->getEntity()) &&
-                                 mRigidBodyComponents.getIsEntityDisabled(jointInfo.body2->getEntity());
-
-    // Allocate memory to create the new joint
-    switch(jointInfo.type) {
-
-        // Ball-and-Socket joint
-        case JointType::BALLSOCKETJOINT:
-        {
-            // Create a BallAndSocketJoint component
-            BallAndSocketJointComponents::BallAndSocketJointComponent ballAndSocketJointComponent(false, PI_RP3D);
-            mBallAndSocketJointsComponents.addComponent(entity, isJointDisabled, ballAndSocketJointComponent);
-
-            void* allocatedMemory = mMemoryManager.allocate(MemoryManager::AllocationType::Pool,
-                                                            sizeof(BallAndSocketJoint));
-            const BallAndSocketJointInfo& info = static_cast<const BallAndSocketJointInfo&>(jointInfo);
-            BallAndSocketJoint* joint = new (allocatedMemory) BallAndSocketJoint(entity, *this, info);
-
-            newJoint = joint;
-            mBallAndSocketJointsComponents.setJoint(entity, joint);
-            break;
-        }
-
-        // Slider joint
-        case JointType::SLIDERJOINT:
-        {
-            const SliderJointInfo& info = static_cast<const SliderJointInfo&>(jointInfo);
-
-            // Create a SliderJoint component
-            SliderJointComponents::SliderJointComponent sliderJointComponent(info.isLimitEnabled, info.isMotorEnabled,
-                                                                             info.minTranslationLimit, info.maxTranslationLimit,
-                                                                             info.motorSpeed, info.maxMotorForce);
-            mSliderJointsComponents.addComponent(entity, isJointDisabled, sliderJointComponent);
-
-            void* allocatedMemory = mMemoryManager.allocate(MemoryManager::AllocationType::Pool, sizeof(SliderJoint));
-            SliderJoint* joint = new (allocatedMemory) SliderJoint(entity, *this, info);
-
-            newJoint = joint;
-            mSliderJointsComponents.setJoint(entity, joint);
-
-            break;
-        }
-
-        // Hinge joint
-        case JointType::HINGEJOINT:
-        {
-            const HingeJointInfo& info = static_cast<const HingeJointInfo&>(jointInfo);
-
-            // Create a HingeJoint component
-            HingeJointComponents::HingeJointComponent hingeJointComponent(info.isLimitEnabled, info.isMotorEnabled,
-                                                                          info.minAngleLimit, info.maxAngleLimit,
-                                                                          info.motorSpeed, info.maxMotorTorque);
-            mHingeJointsComponents.addComponent(entity, isJointDisabled, hingeJointComponent);
-
-            void* allocatedMemory = mMemoryManager.allocate(MemoryManager::AllocationType::Pool,
-                                                            sizeof(HingeJoint));
-            HingeJoint* joint = new (allocatedMemory) HingeJoint(entity, *this, info);
-
-            newJoint = joint;
-            mHingeJointsComponents.setJoint(entity, joint);
-            break;
-        }
-
-        // Fixed joint
-        case JointType::FIXEDJOINT:
-        {
-            // Create a BallAndSocketJoint component
-            FixedJointComponents::FixedJointComponent fixedJointComponent;
-            mFixedJointsComponents.addComponent(entity, isJointDisabled, fixedJointComponent);
-
-            void* allocatedMemory = mMemoryManager.allocate(MemoryManager::AllocationType::Pool,
-                                                            sizeof(FixedJoint));
-            const FixedJointInfo& info = static_cast<const FixedJointInfo&>(jointInfo);
-            FixedJoint* joint = new (allocatedMemory) FixedJoint(entity, *this, info);
-
-            newJoint = joint;
-
-            mFixedJointsComponents.setJoint(entity, joint);
-
-            break;
-        }
-
-        default:
-        {
-            assert(false);
-            return nullptr;
-        }
-    }
-
-    JointComponents::JointComponent jointComponent(jointInfo.body1->getEntity(), jointInfo.body2->getEntity(), newJoint, jointInfo.type,
-                                                   jointInfo.positionCorrectionTechnique, jointInfo.isCollisionEnabled);
-    mJointsComponents.addComponent(entity, isJointDisabled, jointComponent);
-
-    // If the collision between the two bodies of the constraint is disabled
-    if (!jointInfo.isCollisionEnabled) {
-
-        // Add the pair of bodies in the set of body pairs that cannot collide with each other
-        mCollisionDetection.addNoCollisionPair(jointInfo.body1->getEntity(), jointInfo.body2->getEntity());
-    }
-
-    RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::Joint,
-             "Joint " + std::to_string(newJoint->getEntity().id) + ": New joint created",  __FILE__, __LINE__);
-    RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::Joint,
-             "Joint " + std::to_string(newJoint->getEntity().id) + ": " + newJoint->to_string(),  __FILE__, __LINE__);
-
-    // Add the joint into the joint array of the bodies involved in the joint
-    addJointToBodies(jointInfo.body1->getEntity(), jointInfo.body2->getEntity(), entity);
-
-    // Return the pointer to the created joint
-    return newJoint;
-}
-
-// Destroy a joint
-/**
- * @param joint Pointer to the joint you want to destroy
- */
-void PhysicsWorld::destroyJoint(Joint* joint) {
-
-    assert(joint != nullptr);
-
-    RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::Joint,
-             "Joint " + std::to_string(joint->getEntity().id) + ": joint destroyed",  __FILE__, __LINE__);
-
-    // If the collision between the two bodies of the constraint was disabled
-    if (!joint->isCollisionEnabled()) {
-
-        // Remove the pair of bodies from the set of body pairs that cannot collide with each other
-        mCollisionDetection.removeNoCollisionPair(joint->getBody1()->getEntity(), joint->getBody2()->getEntity());
-    }
-
-    RigidBody* body1 = joint->getBody1();
-    RigidBody* body2 = joint->getBody2();
-
-    // Wake up the two bodies of the joint
-    body1->setIsSleeping(false);
-    body2->setIsSleeping(false);
-
-    // Remove the joint from the joint array of the bodies involved in the joint
-    mRigidBodyComponents.removeJointFromBody(body1->getEntity(), joint->getEntity());
-    mRigidBodyComponents.removeJointFromBody(body2->getEntity(), joint->getEntity());
-
-    size_t nbBytes = joint->getSizeInBytes();
-
-    Entity jointEntity = joint->getEntity();
-
-    // Destroy the corresponding entity and its components
-    mJointsComponents.removeComponent(jointEntity);
-    if (mBallAndSocketJointsComponents.hasComponent(jointEntity)) {
-        mBallAndSocketJointsComponents.removeComponent(jointEntity);
-    }
-    if (mFixedJointsComponents.hasComponent(jointEntity)) {
-        mFixedJointsComponents.removeComponent(jointEntity);
-    }
-    if (mHingeJointsComponents.hasComponent(jointEntity)) {
-        mHingeJointsComponents.removeComponent(jointEntity);
-    }
-    if (mSliderJointsComponents.hasComponent(jointEntity)) {
-        mSliderJointsComponents.removeComponent(jointEntity);
-    }
-    mEntityManager.destroyEntity(jointEntity);
-
-    // Call the destructor of the joint
-    joint->~Joint();
-
-    // Release the allocated memory
-    mMemoryManager.release(MemoryManager::AllocationType::Pool, joint, nbBytes);
 }
 
 
@@ -702,10 +426,6 @@ void PhysicsWorld::createIslands() {
     const uint32 nbRigidBodyComponents = mRigidBodyComponents.getNbComponents();
     for (uint32 b=0; b < nbRigidBodyComponents; b++) {
         mRigidBodyComponents.mIsAlreadyInIsland[b] = false;
-    }
-    const uint32 nbJointsComponents = mJointsComponents.getNbComponents();
-    for (uint32 i=0; i < nbJointsComponents; i++) {
-        mJointsComponents.mIsAlreadyInIsland[i] = false;
     }
 
     // Reserve memory for the islands
@@ -818,30 +538,7 @@ void PhysicsWorld::createIslands() {
 
             // For each joint in which the current body is involved
             const Array<Entity>& joints = mRigidBodyComponents.getJoints(rigidBodyToVisit->getEntity());
-            const uint32 nbBodyJoints = static_cast<uint32>(joints.size());
-            for (uint32 i=0; i < nbBodyJoints; i++) {
-
-                const uint32 jointComponentIndex = mJointsComponents.getEntityIndex(joints[i]);
-
-                // Check if the current joint has already been added into an island
-                if (mJointsComponents.mIsAlreadyInIsland[jointComponentIndex]) continue;
-
-                // Add the joint into the island
-                mJointsComponents.mIsAlreadyInIsland[jointComponentIndex] = true;
-
-                const Entity body1Entity = mJointsComponents.mBody1Entities[jointComponentIndex];
-                const Entity body2Entity = mJointsComponents.mBody2Entities[jointComponentIndex];
-                const Entity otherBodyEntity = body1Entity == bodyToVisitEntity ? body2Entity : body1Entity;
-
-                const uint32 otherBodyIndex = mRigidBodyComponents.getEntityIndex(otherBodyEntity);
-
-                // Check if the other body has already been added to the island
-                if (mRigidBodyComponents.mIsAlreadyInIsland[otherBodyIndex]) continue;
-
-                // Insert the other body into the stack of bodies to visit
-                bodyEntitiesToVisit.push(otherBodyEntity);
-                mRigidBodyComponents.mIsAlreadyInIsland[otherBodyIndex] = true;
-            }
+            assert(joints.size() == 0);
         }
 
         // Reset the isAlreadyIsland variable of the static bodies so that they

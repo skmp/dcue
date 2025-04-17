@@ -45,29 +45,29 @@ void DynamicsSystem::integrateRigidBodiesPositions(decimal timeStep, bool isSpli
 
     RP3D_PROFILE("DynamicsSystem::integrateRigidBodiesPositions()", mProfiler);
 
-    const decimal isSplitImpulseFactor = isSplitImpulseActive ? decimal(1.0) : decimal(0.0);
+    // const decimal isSplitImpulseFactor = isSplitImpulseActive ? decimal(1.0) : decimal(0.0);
 
-    const uint32 nbRigidBodyComponents = mRigidBodyComponents.getNbEnabledComponents();
-    for (uint32 i=0; i < nbRigidBodyComponents; i++) {
+    // const uint32 nbRigidBodyComponents = mRigidBodyComponents.getNbEnabledComponents();
+    // for (uint32 i=0; i < nbRigidBodyComponents; i++) {
 
-        // Get the constrained velocity
-        Vector3 newLinVelocity = mRigidBodyComponents.mConstrainedLinearVelocities[i];
-        Vector3 newAngVelocity = mRigidBodyComponents.mConstrainedAngularVelocities[i];
+    //     // Get the constrained velocity
+    //     Vector3 newLinVelocity = mRigidBodyComponents.mConstrainedLinearVelocities[i];
+    //     Vector3 newAngVelocity = mRigidBodyComponents.mConstrainedAngularVelocities[i];
 
-        // Add the split impulse velocity from Contact Solver (only used
-        // to update the position)
-        newLinVelocity += isSplitImpulseFactor * mRigidBodyComponents.mSplitLinearVelocities[i];
-        newAngVelocity += isSplitImpulseFactor * mRigidBodyComponents.mSplitAngularVelocities[i];
+    //     // Add the split impulse velocity from Contact Solver (only used
+    //     // to update the position)
+    //     newLinVelocity += isSplitImpulseFactor * mRigidBodyComponents.mSplitLinearVelocities[i];
+    //     newAngVelocity += isSplitImpulseFactor * mRigidBodyComponents.mSplitAngularVelocities[i];
 
-        // Get current position and orientation of the body
-        const Vector3& currentPosition = mRigidBodyComponents.mCentersOfMassWorld[i];
-        const Quaternion& currentOrientation = mTransformComponents.getTransform(mRigidBodyComponents.mBodiesEntities[i]).getOrientation();
+    //     // Get current position and orientation of the body
+    //     const Vector3& currentPosition = mRigidBodyComponents.mCentersOfMassWorld[i];
+    //     const Quaternion& currentOrientation = mTransformComponents.getTransform(mRigidBodyComponents.mBodiesEntities[i]).getOrientation();
 
-        // Update the new constrained position and orientation of the body
-        mRigidBodyComponents.mConstrainedPositions[i] = currentPosition + newLinVelocity * timeStep;
-        mRigidBodyComponents.mConstrainedOrientations[i] = currentOrientation + Quaternion(0, newAngVelocity) *
-                                                           currentOrientation * decimal(0.5) * timeStep;
-    }
+    //     // Update the new constrained position and orientation of the body
+    //     mRigidBodyComponents.mConstrainedPositions[i] = currentPosition + newLinVelocity * timeStep;
+    //     mRigidBodyComponents.mConstrainedOrientations[i] = currentOrientation + Quaternion(0, newAngVelocity) *
+    //                                                        currentOrientation * decimal(0.5) * timeStep;
+    // }
 }
 
 // Update the postion/orientation of the bodies
@@ -86,8 +86,8 @@ void DynamicsSystem::updateBodiesState() {
         mRigidBodyComponents.mCentersOfMassWorld[i] = mRigidBodyComponents.mConstrainedPositions[i];
 
         // Update the orientation of the body
-        const Quaternion& constrainedOrientation = mRigidBodyComponents.mConstrainedOrientations[i];
-        mTransformComponents.getTransform(mRigidBodyComponents.mBodiesEntities[i]).setOrientation(constrainedOrientation.getUnit());
+        // const Quaternion& constrainedOrientation = mRigidBodyComponents.mConstrainedOrientations[i];
+        // mTransformComponents.getTransform(mRigidBodyComponents.mBodiesEntities[i]).setOrientation(constrainedOrientation.getUnit());
     }
 
     // Update the position of the body (using the new center of mass and new orientation)

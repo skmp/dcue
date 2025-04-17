@@ -23,7 +23,7 @@
 *                                                                               *
 ********************************************************************************/
 
-#ifndef REACTPHYSICS3D_HINGE_JOINT_H
+#ifdef REACTPHYSICS3D_HINGE_JOINT_H
 #define REACTPHYSICS3D_HINGE_JOINT_H
 
 // Libraries

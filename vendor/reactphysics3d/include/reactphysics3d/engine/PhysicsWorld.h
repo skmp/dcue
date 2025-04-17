@@ -195,21 +195,6 @@ class PhysicsWorld {
         /// Collider Components
         ColliderComponents mCollidersComponents;
 
-        /// Joint Components
-        JointComponents mJointsComponents;
-
-        /// Ball And Socket joints Components
-        BallAndSocketJointComponents mBallAndSocketJointsComponents;
-
-        /// Fixed joints Components
-        FixedJointComponents mFixedJointsComponents;
-
-        /// Hinge joints Components
-        HingeJointComponents mHingeJointsComponents;
-
-        /// Slider joints Components
-        SliderJointComponents mSliderJointsComponents;
-
         /// Reference to the collision detection
         CollisionDetectionSystem mCollisionDetection;
 
@@ -241,9 +226,6 @@ class PhysicsWorld {
 
         /// Contact solver system
         ContactSolverSystem mContactSolverSystem;
-
-        /// Constraint solver system
-        ConstraintSolverSystem mConstraintSolverSystem;
 
         /// Dynamics system
         DynamicsSystem mDynamicsSystem;
@@ -283,9 +265,6 @@ class PhysicsWorld {
 
         /// Solve the contacts and constraints
         void solveContactsAndConstraints(decimal timeStep);
-
-        /// Solve the position error correction of the constraints
-        void solvePositionCorrection();
 
         /// Compute the islands of awake bodies.
         void computeIslands();

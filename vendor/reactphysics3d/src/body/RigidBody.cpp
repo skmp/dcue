@@ -441,7 +441,7 @@ void RigidBody::computeMassAndInertiaTensorLocal(Vector3& inertiaTensorLocal, de
 
         // Convert the collider inertia tensor into the local-space of the body
         const Transform& shapeTransform = mWorld.mCollidersComponents.mLocalToBodyTransforms[colliderIndex];
-        Matrix3x3 rotationMatrix = shapeTransform.getOrientation().getMatrix();
+        Matrix3x3 rotationMatrix = shapeTransform.getOrientation();
         Matrix3x3 rotationMatrixTranspose = rotationMatrix.getTranspose();
         rotationMatrixTranspose[0] *= shapeLocalInertiaTensor.x;
         rotationMatrixTranspose[1] *= shapeLocalInertiaTensor.y;

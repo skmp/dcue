@@ -112,7 +112,7 @@ OBJS_REPACKER= \
 DEPS_REPACKER=$(OBJS_REPACKER:.o=.d)
 
 repacker.elf: $(OBJS_REPACKER) | pvrtex
-	$(CXX) -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER)
+	$(CXX) -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER) -lmeshoptimizer
 
 $(PROJECT_NAME).cdi: $(TARGET)
 	mkdcdisc -e $(TARGET) -o $(PROJECT_NAME).cdi -d $(DATA_DIR)/ $(MKDCDISC_PAD_OPTION) -n $(PROJECT_NAME) -a $(TEAM_NAME) -s $(DISC_SERIAL) -r $(RELEASE_DATE)

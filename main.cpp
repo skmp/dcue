@@ -3101,13 +3101,12 @@ Task zoom_in_out_t::doAnimation() {
 }
 void zoom_in_out_t::interact() {
 	reactphysics3d::Transform targetTransform;
-	reactphysics3d::Vector3 scale3d;
-	targetTransform.setFromOpenGL(&gameObjects[targetIndex]->ltw.m00, scale3d);
+	targetTransform.setFromOpenGL(&gameObjects[targetIndex]->ltw.m00);
 	targetPosition = targetTransform.getPosition();
 	targetRotation = targetTransform.getOrientation();
 
 	reactphysics3d::Transform finalTransform;
-	finalTransform.setFromOpenGL(&gameObjects[cameraIndex]->ltw.m00, scale3d);
+	finalTransform.setFromOpenGL(&gameObjects[cameraIndex]->ltw.m00);
 	finalPosition = finalTransform.getPosition();
 	finalRotation = finalTransform.getOrientation();
 
@@ -3545,10 +3544,10 @@ void box_collider_t::update(float deltaTime) {
 	
 	reactphysics3d::Transform t;
 	reactphysics3d::Vector3 scale3d;
-	t.setFromOpenGL(&localOffset[0][0], scale3d);
+	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 
-	V3d scale = {fabsf(scale3d.x), fabsf(scale3d.y), fabsf(scale3d.z)};
+	V3d scale = {1, 1, 1};
 	//V3d scale = { std::abs(gameObject->scale.x), std::abs(gameObject->scale.y), std::abs(gameObject->scale.z)};
 	if (lastScale != scale || boxShape == nullptr) {
 		if (collider) {
@@ -3585,10 +3584,10 @@ void sphere_collider_t::update(float deltaTime) {
 
 	reactphysics3d::Transform t;
 	reactphysics3d::Vector3 scale3d;
-	t.setFromOpenGL(&localOffset[0][0], scale3d);
+	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 
-	V3d scale3 = {fabsf(scale3d.x), fabsf(scale3d.y), fabsf(scale3d.z)};
+	V3d scale3 = {1, 1, 1};
 	float scale = std::max(scale3.x, std::max(scale3.y, scale3.z));
 	if (lastScale != scale3 || sphereShape == nullptr) {
 		if (collider) {
@@ -3625,10 +3624,10 @@ void capsule_collider_t::update(float deltaTime) {
 
 	reactphysics3d::Transform t;
 	reactphysics3d::Vector3 scale3d;
-	t.setFromOpenGL(&localOffset[0][0], scale3d);
+	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 	
-	V3d scale3 = { fabsf(scale3d.x), fabsf(scale3d.y), fabsf(scale3d.z) };
+	V3d scale3 = { 1, 1, 1 };
 	V2d scale = V2d(std::max(scale3.x, scale3.z), scale3.y);
 
 	if (lastScale != scale3 || capsuleShape == nullptr) {
@@ -3658,10 +3657,10 @@ void mesh_collider_t::update(float deltaTime) {
 
 	reactphysics3d::Transform t;
 	reactphysics3d::Vector3 scale3d;
-	t.setFromOpenGL(&gameObject->ltw.m00, scale3d);
+	t.setFromOpenGL(&gameObject->ltw.m00);
 	rigidBody->setTransform(t);
 
-	V3d scale = { scale3d.x, scale3d.y, scale3d.z };
+	V3d scale = { 1, 1, 1 };
 	
 	if (lastScale != scale || meshShape == nullptr) {
 		if (indexCount == 0 || vertexCount == 0) {

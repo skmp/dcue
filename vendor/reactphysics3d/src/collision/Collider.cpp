@@ -31,6 +31,8 @@
 #include <reactphysics3d/engine/PhysicsWorld.h>
 #include <reactphysics3d/engine/PhysicsCommon.h>
 
+#include <reactphysics3d/body/RigidBody.h>
+
 using namespace reactphysics3d;
 
 // Constructor

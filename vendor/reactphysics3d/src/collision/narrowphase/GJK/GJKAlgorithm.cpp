@@ -81,7 +81,7 @@ void GJKAlgorithm::testCollision(NarrowPhaseInfoBatch& narrowPhaseInfoBatch, uin
 
         // Quaternion that transform a direction from local
         // space of body 1 into local space of body 2
-        Quaternion rotateToBody2 = transform2.getOrientation().getInverse() * transform1.getOrientation();
+        Matrix3x3 rotateToBody2 = transform2.getOrientation().getInverse() * transform1.getOrientation();
 
         // Initialize the margin (sum of margins of both objects)
         decimal margin = shape1->getMargin() + shape2->getMargin();

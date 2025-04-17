@@ -40,9 +40,9 @@ RigidBodyComponents::RigidBodyComponents(MemoryAllocator& allocator)
                                 sizeof(Vector3) + sizeof(Vector3) + sizeof(Vector3) +
                                 sizeof(Vector3) + sizeof(decimal) + sizeof(decimal) +
                                 sizeof(decimal) + sizeof(decimal) + sizeof(Vector3) +
-                                sizeof(Vector3) + + sizeof(Matrix3x3) + sizeof(Vector3) + sizeof(Vector3) +
+                                sizeof(Vector3) + sizeof(Matrix3x3) + sizeof(Vector3) + sizeof(Vector3) +
                                 sizeof(Vector3) + sizeof(Vector3) + sizeof(Vector3) +
-                                sizeof(Quaternion) + sizeof(Vector3) + sizeof(Vector3) +
+                                sizeof(Matrix3x3) + sizeof(Vector3) + sizeof(Vector3) +
                                 sizeof(bool) + sizeof(bool) + sizeof(Array<Entity>) + sizeof(Array<uint>) +
                                 sizeof(Vector3) + sizeof(Vector3), 31 * GLOBAL_ALIGNMENT) {
 
@@ -108,7 +108,7 @@ void RigidBodyComponents::allocate(uint32 nbComponentsToAllocate) {
     assert(reinterpret_cast<uintptr_t>(newSplitAngularVelocities) % GLOBAL_ALIGNMENT == 0);
     Vector3* newConstrainedPositions = reinterpret_cast<Vector3*>(MemoryAllocator::alignAddress(newSplitAngularVelocities + nbComponentsToAllocate, GLOBAL_ALIGNMENT));
     assert(reinterpret_cast<uintptr_t>(newConstrainedPositions) % GLOBAL_ALIGNMENT == 0);
-    Quaternion* newConstrainedOrientations = reinterpret_cast<Quaternion*>(MemoryAllocator::alignAddress(newConstrainedPositions + nbComponentsToAllocate, GLOBAL_ALIGNMENT));
+    Matrix3x3* newConstrainedOrientations = reinterpret_cast<Matrix3x3*>(MemoryAllocator::alignAddress(newConstrainedPositions + nbComponentsToAllocate, GLOBAL_ALIGNMENT));
     assert(reinterpret_cast<uintptr_t>(newConstrainedOrientations) % GLOBAL_ALIGNMENT == 0);
     Vector3* newCentersOfMassLocal = reinterpret_cast<Vector3*>(MemoryAllocator::alignAddress(newConstrainedOrientations + nbComponentsToAllocate, GLOBAL_ALIGNMENT));
     assert(reinterpret_cast<uintptr_t>(newCentersOfMassLocal) % GLOBAL_ALIGNMENT == 0);
@@ -280,7 +280,7 @@ void RigidBodyComponents::moveComponentToIndex(uint32 srcIndex, uint32 destIndex
     new (mSplitLinearVelocities + destIndex) Vector3(mSplitLinearVelocities[srcIndex]);
     new (mSplitAngularVelocities + destIndex) Vector3(mSplitAngularVelocities[srcIndex]);
     new (mConstrainedPositions + destIndex) Vector3(mConstrainedPositions[srcIndex]);
-    new (mConstrainedOrientations + destIndex) Quaternion(mConstrainedOrientations[srcIndex]);
+    new (mConstrainedOrientations + destIndex) Matrix3x3(mConstrainedOrientations[srcIndex]);
     new (mCentersOfMassLocal + destIndex) Vector3(mCentersOfMassLocal[srcIndex]);
     new (mCentersOfMassWorld + destIndex) Vector3(mCentersOfMassWorld[srcIndex]);
     mIsGravityEnabled[destIndex] = mIsGravityEnabled[srcIndex];
@@ -327,7 +327,7 @@ void RigidBodyComponents::swapComponents(uint32 index1, uint32 index2) {
     Vector3 splitLinearVelocity1(mSplitLinearVelocities[index1]);
     Vector3 splitAngularVelocity1(mSplitAngularVelocities[index1]);
     Vector3 constrainedPosition1 = mConstrainedPositions[index1];
-    Quaternion constrainedOrientation1 = mConstrainedOrientations[index1];
+    Matrix3x3 constrainedOrientation1 = mConstrainedOrientations[index1];
     Vector3 centerOfMassLocal1 = mCentersOfMassLocal[index1];
     Vector3 centerOfMassWorld1 = mCentersOfMassWorld[index1];
     bool isGravityEnabled1 = mIsGravityEnabled[index1];
@@ -406,7 +406,7 @@ void RigidBodyComponents::destroyComponent(uint32 index) {
     mSplitLinearVelocities[index].~Vector3();
     mSplitAngularVelocities[index].~Vector3();
     mConstrainedPositions[index].~Vector3();
-    mConstrainedOrientations[index].~Quaternion();
+    mConstrainedOrientations[index].~Matrix3x3();
     mCentersOfMassLocal[index].~Vector3();
     mCentersOfMassWorld[index].~Vector3();
     mJoints[index].~Array<Entity>();

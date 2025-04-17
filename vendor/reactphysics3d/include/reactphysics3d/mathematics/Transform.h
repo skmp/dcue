@@ -29,6 +29,7 @@
 // Libraries
 #include <reactphysics3d/mathematics/Vector3.h>
 #include <reactphysics3d/mathematics/Quaternion.h>
+#include <reactphysics3d/mathematics/Matrix3x3.h>
 
 // ReactPhysiscs3D namespace
 namespace reactphysics3d {
@@ -48,7 +49,7 @@ class Transform {
         Vector3 mPosition;
 
         /// Orientation
-        Quaternion mOrientation;
+        Matrix3x3 mOrientation;
 
     public :
 
@@ -70,16 +71,16 @@ class Transform {
         void setPosition(const Vector3& position);
 
         /// Return the orientation quaternion
-        const Quaternion& getOrientation() const;
+        const Matrix3x3& getOrientation() const;
 
         /// Set the rotation quaternion
-        void setOrientation(const Quaternion& orientation);
+        void setOrientation(const Matrix3x3& orientation);
 
         /// Set the transform to the identity transform
         void setToIdentity();
 
         /// Set the transform from an OpenGL transform matrix
-        void setFromOpenGL(decimal* openglMatrix, Vector3& scale);
+        void setFromOpenGL(decimal* openglMatrix);
 
         /// Get the OpenGL matrix of the transform
         void getOpenGLMatrix(decimal* openglMatrix) const;
@@ -116,19 +117,19 @@ class Transform {
 };
 
 // Constructor
-RP3D_FORCE_INLINE Transform::Transform() : mPosition(Vector3(0.0, 0.0, 0.0)), mOrientation(Quaternion::identity()) {
+RP3D_FORCE_INLINE Transform::Transform() : mPosition(Vector3(0.0, 0.0, 0.0)), mOrientation(Quaternion::identity().getMatrix()) {
 
 }
 
 // Constructor
 RP3D_FORCE_INLINE Transform::Transform(const Vector3& position, const Matrix3x3& orientation)
-          : mPosition(position), mOrientation(Quaternion(orientation)) {
+          : mPosition(position), mOrientation(orientation) {
 
 }
 
 // Constructor
 RP3D_FORCE_INLINE Transform::Transform(const Vector3& position, const Quaternion& orientation)
-          : mPosition(position), mOrientation(orientation) {
+          : mPosition(position), mOrientation(orientation.getMatrix()) {
 
 }
 
@@ -143,41 +144,41 @@ RP3D_FORCE_INLINE void Transform::setPosition(const Vector3& position) {
 }
 
 // Return the rotation matrix
-RP3D_FORCE_INLINE const Quaternion& Transform::getOrientation() const {
+RP3D_FORCE_INLINE const Matrix3x3& Transform::getOrientation() const {
     return mOrientation;
 }
 
 // Set the rotation matrix of the transform
-RP3D_FORCE_INLINE void Transform::setOrientation(const Quaternion& orientation) {
+RP3D_FORCE_INLINE void Transform::setOrientation(const Matrix3x3& orientation) {
     mOrientation = orientation;
 }
 
 // Set the transform to the identity transform
 RP3D_FORCE_INLINE void Transform::setToIdentity() {
     mPosition = Vector3(0.0, 0.0, 0.0);
-    mOrientation = Quaternion::identity();
+    mOrientation = Quaternion::identity().getMatrix();
 }                                           
 
 // Return the inverse of the transform
 RP3D_FORCE_INLINE Transform Transform::getInverse() const {
-    const Quaternion& invQuaternion = mOrientation.getInverse();
-    return Transform(invQuaternion * (-mPosition), invQuaternion);
+    const Matrix3x3 invOrientation = mOrientation.getInverse();
+    return Transform(invOrientation * (-mPosition), invOrientation);
 }
 
-// Return an interpolated transform
-RP3D_FORCE_INLINE Transform Transform::interpolateTransforms(const Transform& oldTransform,
-                                                  const Transform& newTransform,
-                                                  decimal interpolationFactor) {
+// // Return an interpolated transform
+// RP3D_FORCE_INLINE Transform Transform::interpolateTransforms(const Transform& oldTransform,
+//                                                   const Transform& newTransform,
+//                                                   decimal interpolationFactor) {
 
-    Vector3 interPosition = oldTransform.mPosition * (decimal(1.0) - interpolationFactor) +
-                            newTransform.mPosition * interpolationFactor;
+//     Vector3 interPosition = oldTransform.mPosition * (decimal(1.0) - interpolationFactor) +
+//                             newTransform.mPosition * interpolationFactor;
 
-    Quaternion interOrientation = Quaternion::slerp(oldTransform.mOrientation,
-                                                    newTransform.mOrientation,
-                                                    interpolationFactor);
+//     Quaternion interOrientation = Quaternion::slerp(oldTransform.mOrientation,
+//                                                     newTransform.mOrientation,
+//                                                     interpolationFactor);
 
-    return Transform(interPosition, interOrientation);
-}
+//     return Transform(interPosition, interOrientation);
+// }
 
 // Return the identity transform
 RP3D_FORCE_INLINE Transform Transform::identity() {
@@ -186,7 +187,7 @@ RP3D_FORCE_INLINE Transform Transform::identity() {
 
 // Return true if it is a valid transform
 RP3D_FORCE_INLINE bool Transform::isValid() const {
-    return mPosition.isFinite() && mOrientation.isValid();
+    return mPosition.isFinite() /* && mOrientation.isValid()*/;
 }
 
 // Return the transformed vector
@@ -198,29 +199,29 @@ RP3D_FORCE_INLINE Vector3 Transform::operator*(const Vector3& vector) const {
 RP3D_FORCE_INLINE Transform Transform::operator*(const Transform& transform2) const {
 
     // The following code is equivalent to this
-    //return Transform(mPosition + mOrientation * transform2.mPosition,
-    //                 mOrientation * transform2.mOrientation);
+    return Transform(mPosition + mOrientation * transform2.mPosition,
+                    mOrientation * transform2.mOrientation);
 
-    const decimal prodX = mOrientation.w * transform2.mPosition.x + mOrientation.y * transform2.mPosition.z
-                          - mOrientation.z * transform2.mPosition.y;
-    const decimal prodY = mOrientation.w * transform2.mPosition.y + mOrientation.z * transform2.mPosition.x
-                          - mOrientation.x * transform2.mPosition.z;
-    const decimal prodZ = mOrientation.w * transform2.mPosition.z + mOrientation.x * transform2.mPosition.y
-                          - mOrientation.y * transform2.mPosition.x;
-    const decimal prodW = -mOrientation.x * transform2.mPosition.x - mOrientation.y * transform2.mPosition.y
-                          - mOrientation.z * transform2.mPosition.z;
+    // const decimal prodX = mOrientation.w * transform2.mPosition.x + mOrientation.y * transform2.mPosition.z
+    //                       - mOrientation.z * transform2.mPosition.y;
+    // const decimal prodY = mOrientation.w * transform2.mPosition.y + mOrientation.z * transform2.mPosition.x
+    //                       - mOrientation.x * transform2.mPosition.z;
+    // const decimal prodZ = mOrientation.w * transform2.mPosition.z + mOrientation.x * transform2.mPosition.y
+    //                       - mOrientation.y * transform2.mPosition.x;
+    // const decimal prodW = -mOrientation.x * transform2.mPosition.x - mOrientation.y * transform2.mPosition.y
+    //                       - mOrientation.z * transform2.mPosition.z;
 
-    return Transform(Vector3(mPosition.x + mOrientation.w * prodX - prodY * mOrientation.z + prodZ * mOrientation.y - prodW * mOrientation.x,
-                             mPosition.y + mOrientation.w * prodY - prodZ * mOrientation.x + prodX * mOrientation.z - prodW * mOrientation.y,
-                             mPosition.z + mOrientation.w * prodZ - prodX * mOrientation.y + prodY * mOrientation.x - prodW * mOrientation.z),
-                     Quaternion(mOrientation.w * transform2.mOrientation.x + transform2.mOrientation.w * mOrientation.x
-                       + mOrientation.y * transform2.mOrientation.z - mOrientation.z * transform2.mOrientation.y,
-                      mOrientation.w * transform2.mOrientation.y + transform2.mOrientation.w * mOrientation.y
-                       + mOrientation.z * transform2.mOrientation.x - mOrientation.x * transform2.mOrientation.z,
-                      mOrientation.w * transform2.mOrientation.z + transform2.mOrientation.w * mOrientation.z
-                       + mOrientation.x * transform2.mOrientation.y - mOrientation.y * transform2.mOrientation.x,
-                      mOrientation.w * transform2.mOrientation.w - mOrientation.x * transform2.mOrientation.x
-                       - mOrientation.y * transform2.mOrientation.y - mOrientation.z * transform2.mOrientation.z));
+    // return Transform(Vector3(mPosition.x + mOrientation.w * prodX - prodY * mOrientation.z + prodZ * mOrientation.y - prodW * mOrientation.x,
+    //                          mPosition.y + mOrientation.w * prodY - prodZ * mOrientation.x + prodX * mOrientation.z - prodW * mOrientation.y,
+    //                          mPosition.z + mOrientation.w * prodZ - prodX * mOrientation.y + prodY * mOrientation.x - prodW * mOrientation.z),
+    //                  Quaternion(mOrientation.w * transform2.mOrientation.x + transform2.mOrientation.w * mOrientation.x
+    //                    + mOrientation.y * transform2.mOrientation.z - mOrientation.z * transform2.mOrientation.y,
+    //                   mOrientation.w * transform2.mOrientation.y + transform2.mOrientation.w * mOrientation.y
+    //                    + mOrientation.z * transform2.mOrientation.x - mOrientation.x * transform2.mOrientation.z,
+    //                   mOrientation.w * transform2.mOrientation.z + transform2.mOrientation.w * mOrientation.z
+    //                    + mOrientation.x * transform2.mOrientation.y - mOrientation.y * transform2.mOrientation.x,
+    //                   mOrientation.w * transform2.mOrientation.w - mOrientation.x * transform2.mOrientation.x
+    //                    - mOrientation.y * transform2.mOrientation.y - mOrientation.z * transform2.mOrientation.z));
 }
 
 // Return true if the two transforms are equal

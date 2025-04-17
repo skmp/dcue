@@ -36,6 +36,7 @@
 #include <reactphysics3d/collision/Collider.h>
 #include <reactphysics3d/engine/PhysicsWorld.h>
 #include <reactphysics3d/containers/Pair.h>
+#include <reactphysics3d/body/RigidBody.h>
 
 using namespace reactphysics3d;
 

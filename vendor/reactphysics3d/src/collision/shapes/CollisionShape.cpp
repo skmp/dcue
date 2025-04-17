@@ -59,7 +59,7 @@ AABB CollisionShape::computeTransformedAABB(const Transform& transform) const {
     AABB aabb = getLocalBounds();
 
     const Vector3& translation = transform.getPosition();
-    Matrix3x3 matrix = transform.getOrientation().getMatrix();
+    Matrix3x3 matrix = transform.getOrientation();
     Vector3 resultMin;
     Vector3 resultMax;
 

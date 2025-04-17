@@ -23,7 +23,7 @@
 *                                                                               *
 ********************************************************************************/
 
-#ifndef REACTPHYSICS3D_BALL_AND_SOCKET_JOINT_H
+#ifdef REACTPHYSICS3D_BALL_AND_SOCKET_JOINT_H
 #define REACTPHYSICS3D_BALL_AND_SOCKET_JOINT_H
 
 // Libraries

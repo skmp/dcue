@@ -23,7 +23,7 @@
 *                                                                               *
 ********************************************************************************/
 
-#ifndef REACTPHYSICS3D_CONSTRAINT_H
+#ifdef REACTPHYSICS3D_CONSTRAINT_H
 #define REACTPHYSICS3D_CONSTRAINT_H
 
 // Libraries

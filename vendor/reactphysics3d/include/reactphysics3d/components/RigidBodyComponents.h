@@ -133,7 +133,7 @@ class RigidBodyComponents : public Components {
         Vector3* mConstrainedPositions;
 
         /// Array of constrained orientation for each component (for position error correction)
-        Quaternion* mConstrainedOrientations;
+        Matrix3x3* mConstrainedOrientations;
 
         /// Array of center of mass of each component (in local-space coordinates)
         Vector3* mCentersOfMassLocal;
@@ -309,7 +309,7 @@ class RigidBodyComponents : public Components {
         Vector3& getConstrainedPosition(Entity bodyEntity);
 
         /// Return the constrained orientation of an entity
-        Quaternion& getConstrainedOrientation(Entity bodyEntity);
+        Matrix3x3& getConstrainedOrientation(Entity bodyEntity);
 
         /// Return the local center of mass of an entity
         const Vector3& getCenterOfMassLocal(Entity bodyEntity);
@@ -345,7 +345,7 @@ class RigidBodyComponents : public Components {
         void setConstrainedPosition(Entity bodyEntity, const Vector3& constrainedPosition);
 
         /// Set the constrained orientation of an entity
-        void setConstrainedOrientation(Entity bodyEntity, const Quaternion& constrainedOrientation);
+        void setConstrainedOrientation(Entity bodyEntity, const Matrix3x3& constrainedOrientation);
 
         /// Set the local center of mass of an entity
         void setCenterOfMassLocal(Entity bodyEntity, const Vector3& centerOfMassLocal);
@@ -685,7 +685,7 @@ RP3D_FORCE_INLINE Vector3& RigidBodyComponents::getConstrainedPosition(Entity bo
 }
 
 // Return the constrained orientation of an entity
-RP3D_FORCE_INLINE Quaternion& RigidBodyComponents::getConstrainedOrientation(Entity bodyEntity) {
+RP3D_FORCE_INLINE Matrix3x3& RigidBodyComponents::getConstrainedOrientation(Entity bodyEntity) {
 
    assert(mMapEntityToComponentIndex.containsKey(bodyEntity));
 
@@ -749,7 +749,7 @@ RP3D_FORCE_INLINE void RigidBodyComponents::setConstrainedPosition(Entity bodyEn
 }
 
 // Set the constrained orientation of an entity
-RP3D_FORCE_INLINE void RigidBodyComponents::setConstrainedOrientation(Entity bodyEntity, const Quaternion& constrainedOrientation) {
+RP3D_FORCE_INLINE void RigidBodyComponents::setConstrainedOrientation(Entity bodyEntity, const Matrix3x3& constrainedOrientation) {
 
    assert(mMapEntityToComponentIndex.containsKey(bodyEntity));
 
