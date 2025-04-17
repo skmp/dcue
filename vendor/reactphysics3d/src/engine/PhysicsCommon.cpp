@@ -695,18 +695,11 @@ void PhysicsCommon::deleteConvexMesh(ConvexMesh* convexMesh) {
    mMemoryManager.release(MemoryManager::AllocationType::Pool, convexMesh, sizeof(ConvexMesh));
 }
 
-// Create a triangle mesh from a TriangleVertexArray
-/// The data (vertices, faces indices) are copied from the TriangleVertexArray into the created ConvexMesh.
-/**
- * @param triangleVertexArray A reference to the input TriangleVertexArray
- * @param messages A reference to the array to stored the messages (warnings, erros, ...)
- * @return A pointer to the created triangle mesh
- */
-TriangleMesh* PhysicsCommon::createTriangleMesh(const TriangleVertexArray& triangleVertexArray, std::vector<Message>& messages) {
+TriangleMesh* PhysicsCommon::createTriangleMesh(const float* vtx, uint16_t nbVertices, const uint16_t* idx, uint32_t nbTriangles, std::vector<Message>& messages) {
 
     TriangleMesh* mesh = new (mMemoryManager.allocate(MemoryManager::AllocationType::Pool, sizeof(TriangleMesh))) TriangleMesh(mMemoryManager.getHeapAllocator());
 
-    bool isValid = mesh->init(triangleVertexArray, messages);
+    bool isValid = mesh->init(vtx, nbVertices, idx, nbTriangles, messages);
 
     if (!isValid) {
 

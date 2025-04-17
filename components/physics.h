@@ -75,7 +75,7 @@ struct mesh_collider_t {
     reactphysics3d::RigidBody* rigidBody;
     reactphysics3d::Collider* collider;
     reactphysics3d::ConcaveMeshShape* meshShape;
-    V3d lastScale;
+
     void update(float deltaTime);
 };
 

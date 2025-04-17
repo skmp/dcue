@@ -28,7 +28,6 @@ RP3D_OBJECTS = \
 	    ../vendor/reactphysics3d/src/collision/shapes/HeightFieldShape.o \
 	    ../vendor/reactphysics3d/src/collision/RaycastInfo.o \
 	    ../vendor/reactphysics3d/src/collision/Collider.o \
-	    ../vendor/reactphysics3d/src/collision/TriangleVertexArray.o \
 	    ../vendor/reactphysics3d/src/collision/PolygonVertexArray.o \
 	    ../vendor/reactphysics3d/src/collision/VertexArray.o \
 	    ../vendor/reactphysics3d/src/collision/TriangleMesh.o \

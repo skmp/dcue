@@ -135,8 +135,6 @@ class ConcaveMeshShape : public ConcaveShape {
         /// Reference to the triangle half-edge structure
         HalfEdgeStructure& mTriangleHalfEdgeStructure;
 
-        /// Array with the scaled face normals
-        Array<Vector3> mScaledVerticesNormals;
 
         // -------------------- Methods -------------------- //
 
@@ -166,9 +164,6 @@ class ConcaveMeshShape : public ConcaveShape {
         // Return the integer data of leaf node of the dynamic AABB tree
         int32 getDynamicAABBTreeNodeDataInt(int32 nodeID) const;
 
-        /// Compute the scaled faces normals
-        void computeScaledVerticesNormals();
-
     public:
 
         /// Deleted copy-constructor
@@ -193,15 +188,9 @@ class ConcaveMeshShape : public ConcaveShape {
         /// Return the coordinates of the three vertices of a given triangle face
         void getTriangleVertices(uint32 triangleIndex, Vector3& outV1, Vector3& outV2, Vector3& outV3) const;
 
-        /// Return the normals of the three vertices of a given triangle face
-        void getTriangleVerticesNormals(uint32 triangleIndex, Vector3& outN1,
-                                        Vector3& outN2, Vector3& outN3) const;
 
         /// Return the coordinates of a given vertex
         const Vector3 getVertex(uint32 vertexIndex) const;
-
-        /// Return the normal of a given vertex
-        const Vector3& getVertexNormal(uint32 vertexIndex) const;
 
         /// Return the local bounds of the shape in x, y and z directions.
         virtual AABB getLocalBounds() const override;
@@ -242,7 +231,7 @@ RP3D_FORCE_INLINE void ConvexTriangleAABBOverlapCallback::notifyOverlappingNode(
 
     // Get the vertices normals of the triangle
     Vector3 verticesNormals[3];
-    mConcaveMeshShape.getTriangleVerticesNormals(data, verticesNormals[0], verticesNormals[1], verticesNormals[2]);
+    // mConcaveMeshShape.getTriangleVerticesNormals(data, verticesNormals[0], verticesNormals[1], verticesNormals[2]);
 
     // Call the callback to test narrow-phase collision with this triangle
     mTriangleTestCallback.testTriangle(trianglePoints, verticesNormals, mConcaveMeshShape.computeTriangleShapeId(data));

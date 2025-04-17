@@ -114,27 +114,7 @@ bool SATAlgorithm::testCollisionSphereVsConvexPolyhedron(NarrowPhaseInfoBatch& n
         }
 
         // If we need to report contacts
-        if (narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts) {
-
-            const Vector3 minFaceNormal = polyhedron->getFaceNormal(minFaceIndex);
-            Vector3 minFaceNormalWorld = polyhedronToWorldTransform.getOrientation() * minFaceNormal;
-            Vector3 contactPointSphereLocal = sphereToWorldTransform.getInverse().getOrientation() * (-minFaceNormalWorld * sphere->getRadius());
-            Vector3 contactPointPolyhedronLocal = sphereCenter + minFaceNormal * (minPenetrationDepth - sphere->getRadius());
-
-            Vector3 normalWorld = isSphereShape1 ? -minFaceNormalWorld : minFaceNormalWorld;
-
-            // Compute smooth triangle mesh contact if one of the two collision shapes is a triangle
-            TriangleShape::computeSmoothTriangleMeshContact(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape1, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape2,
-                                                            isSphereShape1 ? contactPointSphereLocal : contactPointPolyhedronLocal,
-                                                            isSphereShape1 ? contactPointPolyhedronLocal : contactPointSphereLocal,
-                                                            narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape1ToWorldTransform, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform,
-                                                            minPenetrationDepth, normalWorld);
-
-            // Create the contact info object
-            narrowPhaseInfoBatch.addContactPoint(batchIndex, normalWorld, minPenetrationDepth,
-                                             isSphereShape1 ? contactPointSphereLocal : contactPointPolyhedronLocal,
-                                             isSphereShape1 ? contactPointPolyhedronLocal : contactPointSphereLocal);
-        }
+        assert(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts == 0);
 
         narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].isColliding = true;
         isCollisionFound = true;
@@ -289,30 +269,7 @@ bool SATAlgorithm::testCollisionCapsuleVsConvexPolyhedron(NarrowPhaseInfoBatch& 
     else {   // The separating axis is the cross product of a polyhedron edge and the inner capsule segment
 
         // If we need to report contacts
-        if (narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts) {
-
-            // Compute the closest points between the inner capsule segment and the
-            // edge of the polyhedron in polyhedron local-space
-            Vector3 closestPointPolyhedronEdge, closestPointCapsuleInnerSegment;
-            computeClosestPointBetweenTwoSegments(capsuleSegAPolyhedronSpace, capsuleSegBPolyhedronSpace,
-                                                  separatingPolyhedronEdgeVertex1, separatingPolyhedronEdgeVertex2,
-                                                  closestPointCapsuleInnerSegment, closestPointPolyhedronEdge);
-
-            // Project closest capsule inner segment point into the capsule bounds
-            Vector3 contactPointCapsule = (polyhedronToCapsuleTransform * closestPointCapsuleInnerSegment) - separatingAxisCapsuleSpace * capsuleRadius;
-
-            // Compute smooth triangle mesh contact if one of the two collision shapes is a triangle
-            TriangleShape::computeSmoothTriangleMeshContact(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape1, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape2,
-                                                        isCapsuleShape1 ? contactPointCapsule : closestPointPolyhedronEdge,
-                                                        isCapsuleShape1 ? closestPointPolyhedronEdge : contactPointCapsule,
-                                                        narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape1ToWorldTransform, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform,
-                                                        minPenetrationDepth, normalWorld);
-
-            // Create the contact point
-            narrowPhaseInfoBatch.addContactPoint(batchIndex, normalWorld, minPenetrationDepth,
-                                                isCapsuleShape1 ? contactPointCapsule : closestPointPolyhedronEdge,
-                                                isCapsuleShape1 ? closestPointPolyhedronEdge : contactPointCapsule);
-        }
+        assert(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts == 0);
     }
 
     return true;
@@ -383,90 +340,8 @@ bool SATAlgorithm::computeCapsulePolyhedronFaceContactPoints(uint32 referenceFac
                                                              Vector3& normalWorld, const Vector3& separatingAxisCapsuleSpace,
                                                              const Vector3& capsuleSegAPolyhedronSpace, const Vector3& capsuleSegBPolyhedronSpace,
                                                              NarrowPhaseInfoBatch& narrowPhaseInfoBatch, uint32 batchIndex, bool isCapsuleShape1) const {
-
-    RP3D_PROFILE("SATAlgorithm::computeCapsulePolyhedronFaceContactPoints", mProfiler);
-
-    const HalfEdgeStructure::Face& face = polyhedron->getFace(referenceFaceIndex);
-
-    // Get the face normal
-    Vector3 faceNormal = polyhedron->getFaceNormal(referenceFaceIndex);
-
-    uint32 firstEdgeIndex = face.edgeIndex;
-    uint32 edgeIndex = firstEdgeIndex;
-
-    Array<Vector3> planesPoints(mMemoryAllocator, 2);
-    Array<Vector3> planesNormals(mMemoryAllocator, 2);
-
-    // For each adjacent edge of the separating face of the polyhedron
-    do {
-
-        const HalfEdgeStructure::Edge& edge = polyhedron->getHalfEdge(edgeIndex);
-        const HalfEdgeStructure::Edge& twinEdge = polyhedron->getHalfEdge(edge.twinEdgeIndex);
-
-        // Compute the edge vertices and edge direction
-        Vector3 edgeV1 = polyhedron->getVertexPosition(edge.vertexIndex);
-        Vector3 edgeV2 = polyhedron->getVertexPosition(twinEdge.vertexIndex);
-        Vector3 edgeDirection = edgeV2 - edgeV1;
-
-        // Compute the normal of the clipping plane for this edge
-        // The clipping plane is perpendicular to the edge direction and the reference face normal
-        Vector3 clipPlaneNormal = faceNormal.cross(edgeDirection);
-
-        // Construct a clipping plane for each adjacent edge of the separating face of the polyhedron
-        planesPoints.add(polyhedron->getVertexPosition(edge.vertexIndex));
-        planesNormals.add(clipPlaneNormal);
-
-        edgeIndex = edge.nextEdgeIndex;
-
-    } while(edgeIndex != firstEdgeIndex);
-
-    // First we clip the inner segment of the capsule with the four planes of the adjacent faces
-    Array<Vector3> clipSegment = clipSegmentWithPlanes(capsuleSegAPolyhedronSpace, capsuleSegBPolyhedronSpace, planesPoints, planesNormals, mMemoryAllocator);
-
-	// Project the two clipped points into the polyhedron face
-	const Vector3 delta = faceNormal * (penetrationDepth - capsuleRadius);
-
-    bool contactFound = false;
-
-	// For each of the two clipped points
-    const uint32 nbClipSegments = static_cast<uint32>(clipSegment.size());
-    for (uint32 i = 0; i < nbClipSegments; i++) {
-
-		// Compute the penetration depth of the two clipped points (to filter out the points that does not correspond to the penetration depth)
-		const decimal clipPointPenDepth = (planesPoints[0] - clipSegment[i]).dot(faceNormal);
-
-		// If the clipped point is one that produce this penetration depth, we keep it
-		if (clipPointPenDepth > penetrationDepth - capsuleRadius - decimal(0.001)) {
-
-            if (!contactFound) {
-                narrowPhaseInfoBatch.resetContactPoints(batchIndex);
-            }
-
-            contactFound = true;
-
-            Vector3 contactPointPolyhedron = clipSegment[i] + delta;
-
-			// Project the clipped point into the capsule bounds
-            Vector3 contactPointCapsule = (polyhedronToCapsuleTransform * clipSegment[i]) - separatingAxisCapsuleSpace * capsuleRadius;
-
-
-
-            // Compute smooth triangle mesh contact if one of the two collision shapes is a triangle
-            TriangleShape::computeSmoothTriangleMeshContact(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape1, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape2,
-                                                        isCapsuleShape1 ? contactPointCapsule : contactPointPolyhedron,
-                                                        isCapsuleShape1 ? contactPointPolyhedron : contactPointCapsule,
-                                                        narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape1ToWorldTransform, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform,
-                                                        penetrationDepth, normalWorld);
-
-
-			// Create the contact point
-            narrowPhaseInfoBatch.addContactPoint(batchIndex, normalWorld, penetrationDepth,
-                                             isCapsuleShape1 ? contactPointCapsule : contactPointPolyhedron,
-                                             isCapsuleShape1 ? contactPointPolyhedron : contactPointCapsule);
-		}
-	}
-
-    return contactFound;
+    assert(false);
+    return false;
 }
 
 // This method returns true if an edge of a polyhedron and a capsule forms a
@@ -655,25 +530,7 @@ bool SATAlgorithm::testCollisionConvexPolyhedronVsConvexPolyhedron(NarrowPhaseIn
                         if (t1 >= decimal(0.0) && t1 <= decimal(1) && t2 >= decimal(0.0) && t2 <= decimal(1.0)) {
 
                             // If we need to report contact points
-                            if (narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts) {
-
-                                // Compute the contact point on polyhedron 1 edge in the local-space of polyhedron 1
-                                Vector3 closestPointPolyhedron1EdgeLocalSpace = polyhedron2ToPolyhedron1 * closestPointPolyhedron1Edge;
-
-                                // Compute the world normal
-                                Vector3 normalWorld = narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform.getOrientation() * separatingAxisPolyhedron2Space;
-
-                                // Compute smooth triangle mesh contact if one of the two collision shapes is a triangle
-                                TriangleShape::computeSmoothTriangleMeshContact(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape1, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape2,
-                                closestPointPolyhedron1EdgeLocalSpace, closestPointPolyhedron2Edge,
-                                narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape1ToWorldTransform, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform,
-                                penetrationDepth, normalWorld);
-
-                                // Create the contact point
-                                narrowPhaseInfoBatch.addContactPoint(batchIndex, normalWorld, penetrationDepth,
-                                                                     closestPointPolyhedron1EdgeLocalSpace, closestPointPolyhedron2Edge);
-
-                            }
+                            assert(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts == 0);
 
                             // The shapes are overlapping on the previous axis (the contact manifold is not empty). Therefore
                             // we return without running the whole SAT algorithm
@@ -851,29 +708,7 @@ bool SATAlgorithm::testCollisionConvexPolyhedronVsConvexPolyhedron(NarrowPhaseIn
         else {    // If we have an edge vs edge contact
 
             // If we need to report contacts
-            if (narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts) {
-
-                // Compute the closest points between the two edges (in the local-space of poylhedron 2)
-                Vector3 closestPointPolyhedron1Edge, closestPointPolyhedron2Edge;
-                computeClosestPointBetweenTwoSegments(separatingEdge1A, separatingEdge1B, separatingEdge2A, separatingEdge2B,
-                                                      closestPointPolyhedron1Edge, closestPointPolyhedron2Edge);
-
-                // Compute the contact point on polyhedron 1 edge in the local-space of polyhedron 1
-                Vector3 closestPointPolyhedron1EdgeLocalSpace = polyhedron2ToPolyhedron1 * closestPointPolyhedron1Edge;
-
-                // Compute the world normal
-                Vector3 normalWorld = narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform.getOrientation() * minEdgeVsEdgeSeparatingAxisPolyhedron2Space;
-
-                // Compute smooth triangle mesh contact if one of the two collision shapes is a triangle
-                TriangleShape::computeSmoothTriangleMeshContact(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape1, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape2,
-                                                                closestPointPolyhedron1EdgeLocalSpace, closestPointPolyhedron2Edge,
-                                                                narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape1ToWorldTransform, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform,
-                                                                minPenetrationDepth, normalWorld);
-
-                // Create the contact point
-                narrowPhaseInfoBatch.addContactPoint(batchIndex, normalWorld, minPenetrationDepth,
-                                                 closestPointPolyhedron1EdgeLocalSpace, closestPointPolyhedron2Edge);
-            }
+            assert(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts == 0);
 
             lastFrameCollisionInfo->satIsAxisFacePolyhedron1 = false;
             lastFrameCollisionInfo->satIsAxisFacePolyhedron2 = false;
@@ -1007,28 +842,7 @@ bool SATAlgorithm::computePolyhedronVsPolyhedronFaceContactPoints(bool isMinPene
             contactPointsFound = true;
 
             // If we need to report contacts
-            if (narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts) {
-
-                Vector3 outWorldNormal = normalWorld;
-
-                // Convert the clip incident polyhedron vertex into the incident polyhedron local-space
-                Vector3 contactPointIncidentPolyhedron = referenceToIncidentTransform * clippedPolygonVertices[i];
-
-                // Project the contact point onto the reference face
-                Vector3 contactPointReferencePolyhedron = projectPointOntoPlane(clippedPolygonVertices[i], axisReferenceSpace, referenceFaceVertex);
-
-                // Compute smooth triangle mesh contact if one of the two collision shapes is a triangle
-                TriangleShape::computeSmoothTriangleMeshContact(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape1, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].collisionShape2,
-                                        isMinPenetrationFaceNormalPolyhedron1 ? contactPointReferencePolyhedron : contactPointIncidentPolyhedron,
-                                        isMinPenetrationFaceNormalPolyhedron1 ? contactPointIncidentPolyhedron : contactPointReferencePolyhedron,
-                                        narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape1ToWorldTransform, narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].shape2ToWorldTransform,
-                                        penetrationDepth, outWorldNormal);
-
-                // Create a new contact point
-                narrowPhaseInfoBatch.addContactPoint(batchIndex, outWorldNormal, penetrationDepth,
-                                 isMinPenetrationFaceNormalPolyhedron1 ? contactPointReferencePolyhedron : contactPointIncidentPolyhedron,
-                                 isMinPenetrationFaceNormalPolyhedron1 ? contactPointIncidentPolyhedron : contactPointReferencePolyhedron);
-            }
+            assert(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts == 0);
         }
     }
 

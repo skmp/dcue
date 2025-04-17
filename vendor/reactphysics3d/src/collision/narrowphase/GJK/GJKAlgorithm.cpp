@@ -216,16 +216,8 @@ void GJKAlgorithm::testCollision(NarrowPhaseInfoBatch& narrowPhaseInfoBatch, uin
             }
 
             // If we need to report contacts
-            if (narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts) {
-
-                // Compute smooth triangle mesh contact if one of the two collision shapes is a triangle
-                TriangleShape::computeSmoothTriangleMeshContact(shape1, shape2, pA, pB, transform1, transform2,
-                                                                penetrationDepth, normal);
-
-                // Add a new contact point
-                narrowPhaseInfoBatch.addContactPoint(batchIndex, normal, penetrationDepth, pA, pB);
-            }
-
+            assert(narrowPhaseInfoBatch.narrowPhaseInfos[batchIndex].reportContacts == 0);
+            
             assert(gjkResults.size() == batchIndex);
             gjkResults.add(GJKResult::COLLIDE_IN_MARGIN);
 

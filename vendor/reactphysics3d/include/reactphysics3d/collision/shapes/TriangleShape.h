@@ -68,11 +68,6 @@ class TriangleShape : public ConvexPolyhedronShape {
         /// Three points of the triangle
         Vector3 mPoints[3];
 
-        /// Normal of the triangle
-        Vector3 mNormal;
-
-        /// Three vertices normals for smooth collision with triangle mesh
-        Vector3 mVerticesNormals[3];
 
         /// Raycast test type for the triangle (front, back, front-back)
         TriangleRaycastSide mRaycastTestType;
@@ -85,8 +80,6 @@ class TriangleShape : public ConvexPolyhedronShape {
         /// Return a local support point in a given direction without the object margin
         virtual Vector3 getLocalSupportPointWithoutMargin(const Vector3& direction) const override;
 
-        /// Get a smooth contact normal for collision for a triangle of the mesh
-        Vector3 computeSmoothLocalContactNormalForTriangle(const Vector3& localContactPoint) const;
 
         /// Return true if a point is inside the collider
         virtual bool testPointInside(const Vector3& localPoint, Collider* collider) const override;
@@ -101,15 +94,6 @@ class TriangleShape : public ConvexPolyhedronShape {
         void generateId();
 
         // -------------------- Methods -------------------- //
-
-        /// This method implements the technique described in Game Physics Pearl book
-        void computeSmoothMeshContact(Vector3 localContactPointTriangle, const Transform& triangleShapeToWorldTransform,
-                                      const Transform& worldToOtherShapeTransform, decimal penetrationDepth, bool isTriangleShape1,
-                                      Vector3& outNewLocalContactPointOtherShape, Vector3& outSmoothWorldContactTriangleNormal) const;
-
-        /// Constructor
-        TriangleShape(const Vector3* vertices, const Vector3* verticesNormals, uint32 shapeId, HalfEdgeStructure& triangleHalfEdgeStructure,
-                      MemoryAllocator& allocator);
 
         /// Constructor
         TriangleShape(const Vector3* vertices, uint32 shapeId, HalfEdgeStructure& triangleHalfEdgeStructure, MemoryAllocator& allocator);
@@ -158,7 +142,7 @@ class TriangleShape : public ConvexPolyhedronShape {
         virtual Vector3 getVertexPosition(uint32 vertexIndex) const override;
 
         /// Return the normal vector of a given face of the polyhedron
-        virtual Vector3 getFaceNormal(uint32 faceIndex) const override;
+        virtual Vector3 getFaceNormal(uint32 faceIndex) const override { assert(false); return { 0, 0, 0}; }
 
         /// Return the number of half-edges of the polyhedron
         virtual uint32 getNbHalfEdges() const override;
@@ -255,12 +239,6 @@ RP3D_FORCE_INLINE Vector3 TriangleShape::getVertexPosition(uint32 vertexIndex) c
     return mPoints[vertexIndex];
 }
 
-// Return the normal vector of a given face of the polyhedron
-RP3D_FORCE_INLINE Vector3 TriangleShape::getFaceNormal(uint32 faceIndex) const {
-    assert(faceIndex < 2);
-    assert(mNormal.length() > decimal(0.0));
-    return faceIndex == 0 ? mNormal : -mNormal;
-}
 
 // Return the centroid of the box
 RP3D_FORCE_INLINE Vector3 TriangleShape::getCentroid() const {
@@ -294,73 +272,6 @@ RP3D_FORCE_INLINE std::string TriangleShape::to_string() const {
 // Compute and return the volume of the collision shape
 RP3D_FORCE_INLINE decimal TriangleShape::getVolume() const {
     return decimal(0.0);
-}
-
-// Get a smooth contact normal for collision for a triangle of the mesh
-/// This is used to avoid the internal edges issue that occurs when a shape is colliding with
-/// several triangles of a concave mesh. If the shape collide with an edge of the triangle for instance,
-/// the computed contact normal from this triangle edge is not necessarily in the direction of the surface
-/// normal of the mesh at this point. The idea to solve this problem is to use the real (smooth) surface
-/// normal of the mesh at this point as the contact normal. This technique is described in the chapter 5
-/// of the Game Physics Pearl book by Gino van der Bergen and Dirk Gregorius. The vertices normals of the
-/// mesh are either provided by the user or precomputed if the user did not provide them. Note that we only
-/// use the interpolated normal if the contact point is on an edge of the triangle. If the contact is in the
-/// middle of the triangle, we return the true triangle normal.
-RP3D_FORCE_INLINE Vector3 TriangleShape::computeSmoothLocalContactNormalForTriangle(const Vector3& localContactPoint) const {
-
-    assert(mNormal.length() > decimal(0.0));
-
-    // Compute the barycentric coordinates of the point in the triangle
-    decimal u, v, w;
-    computeBarycentricCoordinatesInTriangle(mPoints[0], mPoints[1], mPoints[2], localContactPoint, u, v, w);
-
-    // If the contact is in the middle of the triangle face (not on the edges)
-    if (u > MACHINE_EPSILON && v > MACHINE_EPSILON && w > MACHINE_EPSILON) {
-
-        // We return the true triangle face normal (not the interpolated one)
-        return mNormal;
-    }
-
-    // We compute the contact normal as the barycentric interpolation of the three vertices normals
-    const Vector3 interpolatedNormal = u * mVerticesNormals[0] + v * mVerticesNormals[1] + w * mVerticesNormals[2];
-
-    // If the interpolated normal is degenerated
-    if (interpolatedNormal.lengthSquare() < MACHINE_EPSILON) {
-
-        // Return the original normal
-        return mNormal;
-    }
-
-    return interpolatedNormal.getUnit();
-}
-
-// This method compute the smooth mesh contact with a triangle in case one of the two collision
-// shapes is a triangle. The idea in this case is to use a smooth vertex normal of the triangle mesh
-// at the contact point instead of the triangle normal to avoid the internal edge collision issue.
-// This method will return the new smooth world contact
-// normal of the triangle and the the local contact point on the other shape.
-RP3D_FORCE_INLINE void TriangleShape::computeSmoothTriangleMeshContact(const CollisionShape* shape1, const CollisionShape* shape2,
-                                                     Vector3& localContactPointShape1, Vector3& localContactPointShape2,
-                                                     const Transform& shape1ToWorld, const Transform& shape2ToWorld,
-                                                     decimal penetrationDepth, Vector3& outSmoothVertexNormal) {
-
-    assert(shape1->getName() != CollisionShapeName::TRIANGLE || shape2->getName() != CollisionShapeName::TRIANGLE);
-
-    // If one the shape is a triangle
-    bool isShape1Triangle = shape1->getName() == CollisionShapeName::TRIANGLE;
-    if (isShape1Triangle || shape2->getName() == CollisionShapeName::TRIANGLE) {
-
-        const TriangleShape* triangleShape = isShape1Triangle ? static_cast<const TriangleShape*>(shape1):
-                                                                static_cast<const TriangleShape*>(shape2);
-
-        // Compute the smooth triangle mesh contact normal and recompute the local contact point on the other shape
-        triangleShape->computeSmoothMeshContact(isShape1Triangle ? localContactPointShape1 : localContactPointShape2,
-                                                isShape1Triangle ? shape1ToWorld : shape2ToWorld,
-                                                isShape1Triangle ? shape2ToWorld.getInverse() : shape1ToWorld.getInverse(),
-                                                penetrationDepth, isShape1Triangle,
-                                                isShape1Triangle ? localContactPointShape2 : localContactPointShape1,
-                                                outSmoothVertexNormal);
-    }
 }
 
 // Return a given face of the polyhedron

@@ -3656,13 +3656,12 @@ void mesh_collider_t::update(float deltaTime) {
 	}
 
 	reactphysics3d::Transform t;
-	reactphysics3d::Vector3 scale3d;
+
 	t.setFromOpenGL(&gameObject->ltw.m00);
 	rigidBody->setTransform(t);
 
-	V3d scale = { 1, 1, 1 };
 	
-	if (lastScale != scale || meshShape == nullptr) {
+	if (meshShape == nullptr) {
 		if (indexCount == 0 || vertexCount == 0) {
 			return;
 		}
@@ -3673,13 +3672,8 @@ void mesh_collider_t::update(float deltaTime) {
 		if (!triangleMesh) {
 			triangleMesh = mesh_collider_triangles[{vertices, indices}];
 			if (triangleMesh == nullptr) {
-				reactphysics3d::TriangleVertexArray triangleVertexArray(
-					vertexCount, vertices, sizeof(float)*3, indexCount/3, indices, sizeof(int16_t)*3,
-					reactphysics3d::TriangleVertexArray::VertexDataType::VERTEX_FLOAT_TYPE,
-					reactphysics3d::TriangleVertexArray::IndexDataType::INDEX_SHORT_TYPE
-				);
 				std::vector<reactphysics3d::Message> messages;
-				triangleMesh = physicsCommon.createTriangleMesh(triangleVertexArray, messages);
+				triangleMesh = physicsCommon.createTriangleMesh(vertices, vertexCount, indices, indexCount/3, messages);
 				if (triangleMesh == nullptr) {
 					// Handle error
 					std::cerr << "Failed to create triangle mesh shape" << std::endl;
@@ -3693,10 +3687,9 @@ void mesh_collider_t::update(float deltaTime) {
 				mesh_collider_triangles[{vertices, indices}] = triangleMesh;
 			}
 		}
-		meshShape = physicsCommon.createConcaveMeshShape(triangleMesh, reactphysics3d::Vector3(scale.x, scale.y, scale.z));
+		meshShape = physicsCommon.createConcaveMeshShape(triangleMesh);
 		collider = rigidBody->addCollider(meshShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
-		lastScale = scale;
 	}
 }
 

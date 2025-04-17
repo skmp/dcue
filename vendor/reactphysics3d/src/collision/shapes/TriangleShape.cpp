@@ -36,30 +36,6 @@
 using namespace reactphysics3d;
 
 
-// Constructor
-TriangleShape::TriangleShape(const Vector3* vertices, const Vector3* verticesNormals, uint32 shapeId, HalfEdgeStructure& triangleHalfEdgeStructure, MemoryAllocator& allocator)
-    : ConvexPolyhedronShape(CollisionShapeName::TRIANGLE, allocator), mTriangleHalfEdgeStructure(triangleHalfEdgeStructure) {
-
-    mPoints[0] = vertices[0];
-    mPoints[1] = vertices[1];
-    mPoints[2] = vertices[2];
-
-    // Compute the triangle normal
-    mNormal = (vertices[1] - vertices[0]).cross(vertices[2] - vertices[0]);
-
-    assert(mNormal.length() > MACHINE_EPSILON);
-
-    mNormal.normalize();
-
-    mVerticesNormals[0] = verticesNormals[0];
-    mVerticesNormals[1] = verticesNormals[1];
-    mVerticesNormals[2] = verticesNormals[2];
-
-    mRaycastTestType = TriangleRaycastSide::FRONT;
-
-    mId = shapeId;
-}
-
 // Constructor for raycasting
 TriangleShape::TriangleShape(const Vector3* vertices, uint32 shapeId, HalfEdgeStructure& triangleHalfEdgeStructure, MemoryAllocator& allocator)
     : ConvexPolyhedronShape(CollisionShapeName::TRIANGLE, allocator), mTriangleHalfEdgeStructure(triangleHalfEdgeStructure) {
@@ -68,52 +44,9 @@ TriangleShape::TriangleShape(const Vector3* vertices, uint32 shapeId, HalfEdgeSt
     mPoints[1] = vertices[1];
     mPoints[2] = vertices[2];
 
-    // The normal is not used when creating the triangle shape with this constructor (for raycasting for instance)
-    mNormal = Vector3(0, 0, 0);
-
-    // Interpolated normals are not used in this constructor (for raycasting for instance)
-    mVerticesNormals[0] = mNormal;
-    mVerticesNormals[1] = mNormal;
-    mVerticesNormals[2] = mNormal;
-
     mRaycastTestType = TriangleRaycastSide::FRONT;
 
     mId = shapeId;
-}
-
-// This method implements the technique described in Game Physics Pearl book
-// by Gino van der Bergen and Dirk Gregorius to get smooth triangle mesh collision. The idea is
-// to replace the contact normal of the triangle shape with the precomputed normal of the triangle
-// mesh at this point. Then, we need to recompute the contact point on the other shape in order to
-// stay aligned with the new contact normal. This method will return the new smooth world contact
-// normal of the triangle and the the local contact point on the other shape.
-void TriangleShape::computeSmoothMeshContact(Vector3 localContactPointTriangle, const Transform& triangleShapeToWorldTransform,
-                                             const Transform& worldToOtherShapeTransform, decimal penetrationDepth, bool isTriangleShape1,
-                                             Vector3& outNewLocalContactPointOtherShape, Vector3& outSmoothWorldContactTriangleNormal) const {
-
-    // Get the smooth contact normal of the mesh at the contact point on the triangle
-    Vector3 triangleLocalNormal = computeSmoothLocalContactNormalForTriangle(localContactPointTriangle);
-
-    // Convert the local contact normal into world-space
-    Vector3 triangleWorldNormal = triangleShapeToWorldTransform.getOrientation() * triangleLocalNormal;
-
-    // Penetration axis with direction from triangle to other shape
-    Vector3 triangleToOtherShapePenAxis = isTriangleShape1 ? outSmoothWorldContactTriangleNormal : -outSmoothWorldContactTriangleNormal;
-
-    // The triangle normal should be the one in the direction out of the current colliding face of the triangle
-    if (triangleWorldNormal.dot(triangleToOtherShapePenAxis) < decimal(0.0)) {
-        triangleWorldNormal = -triangleWorldNormal;
-        triangleLocalNormal = -triangleLocalNormal;
-    }
-
-    // Compute the final contact normal from shape 1 to shape 2
-    outSmoothWorldContactTriangleNormal = isTriangleShape1 ? triangleWorldNormal : -triangleWorldNormal;
-
-    // Re-align the local contact point on the other shape such that it is aligned along the new contact normal
-    Vector3 otherShapePointTriangleSpace = localContactPointTriangle - triangleLocalNormal * penetrationDepth;
-    Vector3 otherShapePoint = worldToOtherShapeTransform * triangleShapeToWorldTransform * otherShapePointTriangleSpace;
-
-    outNewLocalContactPointOtherShape.setAllValues(otherShapePoint.x, otherShapePoint.y, otherShapePoint.z);
 }
 
 // Compute the transformed AABB of the collision shape given a transform

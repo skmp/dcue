@@ -587,7 +587,7 @@ void CollisionDetectionSystem::computeConvexVsConcaveMiddlePhase(OverlappingPair
         // Create a triangle collision shape (the allocated memory for the TriangleShape will be released in the
         // destructor of the corresponding NarrowPhaseInfo.
         TriangleShape* triangleShape = new (allocator.allocate(mTriangleShapeAllocatedSize))
-                                       TriangleShape(&(triangleVertices[i * 3]), &(triangleVerticesNormals[i * 3]), shapeIds[i], mTriangleHalfEdgeStructure, allocator);
+                                       TriangleShape(&(triangleVertices[i * 3]), shapeIds[i], mTriangleHalfEdgeStructure, allocator);
 
     #ifdef IS_RP3D_PROFILING_ENABLED
 

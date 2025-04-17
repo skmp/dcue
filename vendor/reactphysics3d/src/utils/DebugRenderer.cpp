@@ -372,13 +372,13 @@ void DebugRenderer::drawConcaveMeshShape(const Transform& transform, const Conca
 
     if (drawNormal) {
 
-        // For each vertex of the mesh
-        for (uint32 v = 0; v < concaveMeshShape->getNbVertices(); v++) {
+        // // For each vertex of the mesh
+        // for (uint32 v = 0; v < concaveMeshShape->getNbVertices(); v++) {
 
-            const Vector3& vertex = transform * concaveMeshShape->getVertex(v);
-            const Vector3 normalPoint = vertex + transform.getOrientation() * concaveMeshShape->getVertexNormal(v) * mCollisionShapeNormalLength;
-            mLines.add(DebugLine(vertex, normalPoint, colorShapeNormals));
-        }
+        //     const Vector3& vertex = transform * concaveMeshShape->getVertex(v);
+        //     const Vector3 normalPoint = vertex + transform.getOrientation() * concaveMeshShape->getVertexNormal(v) * mCollisionShapeNormalLength;
+        //     mLines.add(DebugLine(vertex, normalPoint, colorShapeNormals));
+        // }
     }
 }
 
