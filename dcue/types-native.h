@@ -25,6 +25,7 @@ namespace native {
 
     struct mesh_t {
         Sphere bounding_sphere;
+        uint8_t* quadData;
         uint8_t data[0];
     };
 

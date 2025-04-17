@@ -11,8 +11,10 @@
 #include <sstream>
 #include <iomanip>
 #include <cassert>
+#include <algorithm>
 
 #include <map>
+#include <unordered_map>
 #include <set>
 #include <list>
 
@@ -33,9 +35,552 @@
 #include "vendor/hmm/heightmap.h"
 #include "vendor/hmm/triangulator.h"
 
+#include <meshoptimizer.h>
+
 #define texconvf(...) printf(__VA_ARGS__)
 
 using namespace import;
+
+//----------------------------------------------------------
+// Internal geometry types
+
+struct Vec3 {
+    float x, y, z;
+    Vec3 operator-(const Vec3 &other) const {
+        return { x - other.x, y - other.y, z - other.z };
+    }
+};
+
+struct Triangle {
+    int i0, i1, i2;
+};
+
+struct Quad {
+    int i0, i1, i2, i3;
+};
+
+// An edge defined by two vertex indices (stored in sorted order)
+struct Edge {
+    int a, b;
+    Edge(int v0, int v1) {
+        if (v0 < v1) { a = v0; b = v1; }
+        else { a = v1; b = v0; }
+    }
+    bool operator==(const Edge &other) const {
+        return a == other.a && b == other.b;
+    }
+};
+
+struct EdgeHash {
+    std::size_t operator()(const Edge &e) const {
+        return std::hash<int>()(e.a) ^ std::hash<int>()(e.b);
+    }
+};
+
+// Helper type for 2D points used in the projected plane.
+struct Point2 {
+    float x, y;
+    int idx; // original vertex index; -1 indicates a new vertex
+};
+
+//----------------------------------------------------------
+// Basic vector math and geometry utilities
+
+Vec3 Cross(const Vec3 &a, const Vec3 &b) {
+    return { a.y * b.z - a.z * b.y,
+             a.z * b.x - a.x * b.z,
+             a.x * b.y - a.y * b.x };
+}
+
+float Dot(const Vec3 &a, const Vec3 &b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+float Length(const Vec3 &v) {
+    return std::sqrt(Dot(v, v));
+}
+
+Vec3 Normalize(const Vec3 &v) {
+    float len = Length(v);
+    return { v.x / len, v.y / len, v.z / len };
+}
+
+Vec3 ComputeTriangleNormal(const Vec3 &v0, const Vec3 &v1, const Vec3 &v2) {
+    return Normalize(Cross(v1 - v0, v2 - v0));
+}
+
+bool AreNormalsSimilar(const Vec3 &n1, const Vec3 &n2, float threshold = 0.95f) {
+    return Dot(n1, n2) >= threshold;
+}
+
+bool IsConvexQuad(const Vec3 &v0, const Vec3 &v1, const Vec3 &v2, const Vec3 &v3) {
+    Vec3 normal = Normalize(Cross(v1 - v0, v2 - v0));
+    // Compute cross products for successive edges.
+    Vec3 cp0 = Cross(v1 - v0, v2 - v0);
+    Vec3 cp1 = Cross(v2 - v1, v3 - v1);
+    Vec3 cp2 = Cross(v3 - v2, v0 - v2);
+    Vec3 cp3 = Cross(v0 - v3, v1 - v3);
+    if (Dot(cp0, normal) < 0 || Dot(cp1, normal) < 0 ||
+        Dot(cp2, normal) < 0 || Dot(cp3, normal) < 0)
+        return false;
+    return true;
+}
+
+//----------------------------------------------------------
+// 2D Convex Hull using a variant of the Graham Scan
+
+std::vector<Point2> ComputeConvexHull(const std::vector<Point2>& points) {
+    if (points.size() < 3)
+        return points;
+    float cx = 0.f, cy = 0.f;
+    for (const auto &pt : points) {
+        cx += pt.x; cy += pt.y;
+    }
+    cx /= points.size(); cy /= points.size();
+    std::vector<Point2> sorted = points;
+    std::sort(sorted.begin(), sorted.end(), [cx, cy](const Point2 &a, const Point2 &b) {
+        float angleA = std::atan2(a.y - cy, a.x - cx);
+        float angleB = std::atan2(b.y - cy, b.x - cx);
+        return angleA < angleB;
+    });
+    std::vector<Point2> hull;
+    for (const auto &pt : sorted) {
+        while (hull.size() >= 2) {
+            const Point2 &a = hull[hull.size()-2];
+            const Point2 &b = hull[hull.size()-1];
+            float crossVal = (b.x - a.x) * (pt.y - b.y) - (b.y - a.y) * (pt.x - b.x);
+            if (crossVal <= 0)
+                hull.pop_back();
+            else
+                break;
+        }
+        hull.push_back(pt);
+    }
+    return hull;
+}
+
+//----------------------------------------------------------
+// New: Compute an inscribed quad from a convex polygon in 2D
+// using a simple heuristic by shooting rays at 0, 90, 180, and 270 degrees.
+std::vector<Point2> ComputeInscribedQuadFromHull(const std::vector<Point2>& hull) {
+    std::vector<Point2> result;
+    if (hull.empty())
+        return result;
+    float sumX = 0.f, sumY = 0.f;
+    for (const auto &pt : hull) { sumX += pt.x; sumY += pt.y; }
+    float cx = sumX / hull.size(), cy = sumY / hull.size();
+    std::vector<float> angles = {0.f, 1.5708f, 3.14159f, 4.71239f};
+    for (float theta : angles) {
+        float dx = std::cos(theta), dy = std::sin(theta);
+        float tMin = 1e9; Point2 best; bool found = false;
+        for (size_t i = 0; i < hull.size(); i++) {
+            const Point2 &A = hull[i], &B = hull[(i+1)%hull.size()];
+            float Ax = A.x, Ay = A.y, Bx = B.x, By = B.y;
+            float Ex = Bx - Ax, Ey = By - Ay;
+            float det = dx * Ey - dy * Ex;
+            if (std::abs(det) < 1e-6f)
+                continue;
+            float t = ((Ax - cx) * Ey - (Ay - cy) * Ex) / det;
+            float s = (std::abs(Ex) > std::abs(Ey)) ? (cx + t * dx - Ax) / Ex : (cy + t * dy - Ay) / Ey;
+            if (t >= 0 && s >= 0 && s <= 1) {
+                if (t < tMin) {
+                    tMin = t; best.x = cx + t*dx; best.y = cy + t*dy; best.idx = -1; found = true;
+                }
+            }
+        }
+        if (found)
+            result.push_back(best);
+    }
+    return result;
+}
+
+//----------------------------------------------------------
+// Helper: Compute quad area (by splitting into two triangles)
+float QuadArea(const Quad &quad, const std::vector<Vec3> &vertices) {
+    Vec3 v0 = vertices[quad.i0], v1 = vertices[quad.i1],
+         v2 = vertices[quad.i2], v3 = vertices[quad.i3];
+    float area1 = 0.5f * Length(Cross(v1 - v0, v2 - v0));
+    float area2 = 0.5f * Length(Cross(v2 - v0, v3 - v0));
+    return area1 + area2;
+}
+
+Vec3 ComputeQuadNormal(const Quad &quad, const std::vector<Vec3> &vertices) {
+    Vec3 v0 = vertices[quad.i0], v1 = vertices[quad.i1], v2 = vertices[quad.i2];
+    return ComputeTriangleNormal(v0, v1, v2);
+}
+
+//----------------------------------------------------------
+// Grouping by principal axis bucket: ±x, ±y, ±z.
+enum PrincipalAxis { PLUS_X, MINUS_X, PLUS_Y, MINUS_Y, PLUS_Z, MINUS_Z };
+
+PrincipalAxis GetPrincipalAxis(const Vec3 &n) {
+    float ax = std::abs(n.x), ay = std::abs(n.y), az = std::abs(n.z);
+    if (ax >= ay && ax >= az)
+        return (n.x >= 0.f) ? PLUS_X : MINUS_X;
+    else if (ay >= ax && ay >= az)
+        return (n.y >= 0.f) ? PLUS_Y : MINUS_Y;
+    else
+        return (n.z >= 0.f) ? PLUS_Z : MINUS_Z;
+}
+
+//----------------------------------------------------------
+// Updated MergeQuads: Attempt to merge two quads. This routine
+// projects the union of vertices (from both quads) onto the plane of the first quad.
+// If the convex hull does not yield exactly four 2D points, it computes an inscribed quad,
+// adding new vertices as needed.
+bool MergeQuads(const Quad &q1, const Quad &q2, std::vector<Vec3> &vertices, Quad &mergedQuad) {
+    std::vector<int> q1Verts = { q1.i0, q1.i1, q1.i2, q1.i3 };
+    std::vector<int> q2Verts = { q2.i0, q2.i1, q2.i2, q2.i3 };
+    bool shareEdge = false;
+    for (int i = 0; i < 4 && !shareEdge; i++) {
+        int a = q1Verts[i], b = q1Verts[(i+1)%4];
+        for (int j = 0; j < 4; j++) {
+            int c = q2Verts[j], d = q2Verts[(j+1)%4];
+            if ((a == c && b == d) || (a == d && b == c)) { shareEdge = true; break; }
+        }
+    }
+    if (!shareEdge)
+        return false;
+    
+    std::vector<int> allIndices = { q1.i0, q1.i1, q1.i2, q1.i3, q2.i0, q2.i1, q2.i2, q2.i3 };
+    std::vector<int> uniqueIndices;
+    for (int idx : allIndices) {
+        if (std::find(uniqueIndices.begin(), uniqueIndices.end(), idx) == uniqueIndices.end())
+            uniqueIndices.push_back(idx);
+    }
+    
+    Vec3 origin = vertices[q1.i0];
+    Vec3 p1 = vertices[q1.i1], p2 = vertices[q1.i2];
+    Vec3 planeNormal = ComputeTriangleNormal(origin, p1, p2);
+    Vec3 arbitrary = { 1.f, 0.f, 0.f };
+    if (std::abs(Dot(planeNormal, arbitrary)) > 0.99f)
+        arbitrary = { 0.f, 1.f, 0.f };
+    Vec3 u = Normalize(Cross(planeNormal, arbitrary));
+    Vec3 v = Normalize(Cross(planeNormal, u));
+    
+    std::vector<Point2> pts2D;
+    for (int idx : uniqueIndices) {
+        Vec3 p = vertices[idx];
+        Vec3 diff = { p.x - origin.x, p.y - origin.y, p.z - origin.z };
+        float x = Dot(diff, u), y = Dot(diff, v);
+        pts2D.push_back({ x, y, idx });
+    }
+    
+    std::vector<Point2> hull = ComputeConvexHull(pts2D);
+    if (hull.size() == 4) {
+        mergedQuad.i0 = hull[0].idx;
+        mergedQuad.i1 = hull[1].idx;
+        mergedQuad.i2 = hull[2].idx;
+        mergedQuad.i3 = hull[3].idx;
+    } else {
+        std::vector<Point2> inscribed = ComputeInscribedQuadFromHull(hull);
+        if (inscribed.size() != 4)
+            return false;
+        int idx0 = static_cast<int>(vertices.size());
+        vertices.push_back({ origin.x + inscribed[0].x * u.x + inscribed[0].y * v.x,
+                               origin.y + inscribed[0].x * u.y + inscribed[0].y * v.y,
+                               origin.z + inscribed[0].x * u.z + inscribed[0].y * v.z });
+        int idx1 = static_cast<int>(vertices.size());
+        vertices.push_back({ origin.x + inscribed[1].x * u.x + inscribed[1].y * v.x,
+                               origin.y + inscribed[1].x * u.y + inscribed[1].y * v.y,
+                               origin.z + inscribed[1].x * u.z + inscribed[1].y * v.z });
+        int idx2 = static_cast<int>(vertices.size());
+        vertices.push_back({ origin.x + inscribed[2].x * u.x + inscribed[2].y * v.x,
+                               origin.y + inscribed[2].x * u.y + inscribed[2].y * v.y,
+                               origin.z + inscribed[2].x * u.z + inscribed[2].y * v.z });
+        int idx3 = static_cast<int>(vertices.size());
+        vertices.push_back({ origin.x + inscribed[3].x * u.x + inscribed[3].y * v.x,
+                               origin.y + inscribed[3].x * u.y + inscribed[3].y * v.y,
+                               origin.z + inscribed[3].x * u.z + inscribed[3].y * v.z });
+        mergedQuad.i0 = idx0; mergedQuad.i1 = idx1; mergedQuad.i2 = idx2; mergedQuad.i3 = idx3;
+    }
+    
+    Vec3 A = vertices[mergedQuad.i0],
+         B = vertices[mergedQuad.i1],
+         C = vertices[mergedQuad.i2],
+         D = vertices[mergedQuad.i3];
+    if (!IsConvexQuad(A, B, C, D))
+        return false;
+    Vec3 n = ComputeTriangleNormal(A, B, C);
+    float d = -(n.x * A.x + n.y * A.y + n.z * A.z);
+    const float tol = 1e-4f;
+    for (int idx : { mergedQuad.i0, mergedQuad.i1, mergedQuad.i2, mergedQuad.i3 }) {
+        float dist = std::abs(n.x * vertices[idx].x + n.y * vertices[idx].y + n.z * vertices[idx].z + d);
+        if (dist > tol)
+            return false;
+    }
+    return true;
+}
+
+//----------------------------------------------------------
+// Structure to hold the final result: quads per submesh and the vertex list.
+struct QuadMesh {
+    std::vector<std::vector<Quad>> quadsPerSubmesh;
+    std::vector<Vec3> vertices;
+};
+
+//----------------------------------------------------------
+// Updated CompactVertices: Now we first collect only the vertex indices referenced
+// by any quad and then reindex/compact only those vertices (merging nearly identical ones).
+struct VertexKey {
+    int x, y, z;
+    bool operator==(const VertexKey &other) const {
+        return x == other.x && y == other.y && z == other.z;
+    }
+};
+
+struct VertexKeyHash {
+    std::size_t operator()(const VertexKey &key) const {
+        return std::hash<int>()(key.x) ^ (std::hash<int>()(key.y) << 1) ^ (std::hash<int>()(key.z) << 2);
+    }
+};
+
+void CompactVertices(QuadMesh &qm, float epsilon = 1e-6f) {
+    // First, determine which vertices are referenced by any quad.
+    std::set<int> usedIndices;
+    for (const auto &subQuads : qm.quadsPerSubmesh) {
+        for (const auto &q : subQuads) {
+            usedIndices.insert(q.i0);
+            usedIndices.insert(q.i1);
+            usedIndices.insert(q.i2);
+            usedIndices.insert(q.i3);
+        }
+    }
+    
+    // Build new vertex list from only these indices.
+    std::unordered_map<VertexKey, int, VertexKeyHash> uniqueMap;
+    std::unordered_map<int, int> newIndexMapping; // maps old index -> new index
+    std::vector<Vec3> newVertices;
+    
+    // Iterate only over used indices.
+    for (int i : usedIndices) {
+        const Vec3 &p = qm.vertices[i];
+        VertexKey key = { static_cast<int>(std::round(p.x / epsilon)),
+                          static_cast<int>(std::round(p.y / epsilon)),
+                          static_cast<int>(std::round(p.z / epsilon)) };
+        auto it = uniqueMap.find(key);
+        if (it != uniqueMap.end()) {
+            newIndexMapping[i] = it->second;
+        } else {
+            int newIdx = static_cast<int>(newVertices.size());
+            uniqueMap[key] = newIdx;
+            newVertices.push_back(p);
+            newIndexMapping[i] = newIdx;
+        }
+    }
+    
+    // Update quad indices.
+    for (auto &subQuads : qm.quadsPerSubmesh) {
+        for (auto &q : subQuads) {
+            q.i0 = newIndexMapping[q.i0];
+            q.i1 = newIndexMapping[q.i1];
+            q.i2 = newIndexMapping[q.i2];
+            q.i3 = newIndexMapping[q.i3];
+        }
+    }
+    
+    qm.vertices = newVertices;
+}
+
+//----------------------------------------------------------
+// New: Filter the final quads so that the overall union of vertices is capped at 32.
+// We select quads (largest first) so that the union of their vertices does not exceed 32.
+void FilterMaxVertexCount(QuadMesh &qm, size_t maxVertexCount = 32) {
+    std::vector<Quad> allQuads;
+    for (const auto &sub : qm.quadsPerSubmesh) {
+        for (const auto &q : sub)
+            allQuads.push_back(q);
+    }
+    std::sort(allQuads.begin(), allQuads.end(), [&](const Quad &a, const Quad &b) {
+         return QuadArea(a, qm.vertices) > QuadArea(b, qm.vertices);
+    });
+    std::vector<Quad> selected;
+    std::set<int> unionIndices;
+    for (const Quad &q : allQuads) {
+         std::set<int> candidate = unionIndices;
+         candidate.insert(q.i0);
+         candidate.insert(q.i1);
+         candidate.insert(q.i2);
+         candidate.insert(q.i3);
+         if (candidate.size() <= maxVertexCount) {
+             selected.push_back(q);
+             unionIndices = candidate;
+         }
+    }
+    qm.quadsPerSubmesh.clear();
+    qm.quadsPerSubmesh.push_back(selected);
+    CompactVertices(qm);
+}
+
+//----------------------------------------------------------
+// Main utility function:
+// 1. Generate conservative quads from the input mesh_t (including merging and new vertex creation)
+// 2. Group quads by principal axis buckets and keep top 10 per bucket.
+// 3. Reindex (compact) the vertex list so only used, unique vertices remain.
+// 4. Finally, if the overall vertex count exceeds 32, filter out (cut off) quads,
+//    keeping only the largest ones until the union of vertices is ≤ 32.
+QuadMesh GenerateConservativeQuads(const mesh_t* mesh) {
+    QuadMesh result;
+    result.vertices.resize(mesh->vertex_count);
+    for (size_t i = 0; i < mesh->vertex_count; ++i) {
+        result.vertices[i] = { mesh->vertices[i*3],
+                               mesh->vertices[i*3+1],
+                               mesh->vertices[i*3+2] };
+    }
+    
+    // Process each submesh.
+    for (size_t s = 0; s < mesh->submesh_count; s++) {
+        const submesh_t &sub = mesh->submeshes[s];
+        std::vector<Triangle> triangles;
+        for (size_t i = 0; i < sub.index_count; i += 3) {
+            triangles.push_back({ 
+                static_cast<int>(sub.indices[i]),
+                static_cast<int>(sub.indices[i+1]),
+                static_cast<int>(sub.indices[i+2])
+            });
+        }
+        
+        std::unordered_map<Edge, std::vector<int>, EdgeHash> edgeToTriangles;
+        for (size_t i = 0; i < triangles.size(); i++) {
+            const Triangle &tri = triangles[i];
+            Edge edges[3] = { Edge(tri.i0, tri.i1), Edge(tri.i1, tri.i2), Edge(tri.i2, tri.i0) };
+            for (int j = 0; j < 3; j++)
+                edgeToTriangles[edges[j]].push_back(static_cast<int>(i));
+        }
+        
+        std::vector<bool> usedTriangle(triangles.size(), false);
+        std::vector<Quad> quads;
+        for (const auto &entry : edgeToTriangles) {
+            const Edge &edge = entry.first;
+            const std::vector<int> &tris = entry.second;
+            if (tris.size() != 2)
+                continue;
+            int t0 = tris[0], t1 = tris[1];
+            if (usedTriangle[t0] || usedTriangle[t1])
+                continue;
+            const Triangle &tri0 = triangles[t0];
+            const Triangle &tri1 = triangles[t1];
+            int free0 = (tri0.i0 != edge.a && tri0.i0 != edge.b) ? tri0.i0 :
+                        (tri0.i1 != edge.a && tri0.i1 != edge.b) ? tri0.i1 : tri0.i2;
+            int free1 = (tri1.i0 != edge.a && tri1.i0 != edge.b) ? tri1.i0 :
+                        (tri1.i1 != edge.a && tri1.i1 != edge.b) ? tri1.i1 : tri1.i2;
+            Vec3 n0 = ComputeTriangleNormal(result.vertices[tri0.i0],
+                                             result.vertices[tri0.i1],
+                                             result.vertices[tri0.i2]);
+            Vec3 n1 = ComputeTriangleNormal(result.vertices[tri1.i0],
+                                             result.vertices[tri1.i1],
+                                             result.vertices[tri1.i2]);
+            if (!AreNormalsSimilar(n0, n1))
+                continue;
+            Quad candidate1 = { free0, edge.a, free1, edge.b };
+            Quad candidate2 = { free0, edge.b, free1, edge.a };
+            bool valid = false;
+            Quad finalQuad;
+            {
+                Vec3 A = result.vertices[candidate1.i0],
+                     B = result.vertices[candidate1.i1],
+                     C = result.vertices[candidate1.i2],
+                     D = result.vertices[candidate1.i3];
+                if (IsConvexQuad(A, B, C, D)) {
+                    finalQuad = candidate1;
+                    valid = true;
+                }
+            }
+            if (!valid) {
+                Vec3 A = result.vertices[candidate2.i0],
+                     B = result.vertices[candidate2.i1],
+                     C = result.vertices[candidate2.i2],
+                     D = result.vertices[candidate2.i3];
+                if (IsConvexQuad(A, B, C, D)) {
+                    finalQuad = candidate2;
+                    valid = true;
+                }
+            }
+            if (valid) {
+                quads.push_back(finalQuad);
+                usedTriangle[t0] = usedTriangle[t1] = true;
+            }
+        }
+        
+        bool mergedAny = true;
+        while (mergedAny) {
+            mergedAny = false;
+            std::vector<Quad> newQuads;
+            std::vector<bool> used(quads.size(), false);
+            for (size_t i = 0; i < quads.size(); i++) {
+                if (used[i])
+                    continue;
+                bool merged = false;
+                for (size_t j = i+1; j < quads.size(); j++) {
+                    if (used[j])
+                        continue;
+                    Quad candidate;
+                    if (MergeQuads(quads[i], quads[j], result.vertices, candidate)) {
+                        newQuads.push_back(candidate);
+                        used[i] = used[j] = true;
+                        merged = true;
+                        mergedAny = true;
+                        break;
+                    }
+                }
+                if (!merged && !used[i])
+                    newQuads.push_back(quads[i]);
+            }
+            quads = newQuads;
+        }
+        
+        std::vector<Quad> filteredQuads;
+        std::vector<std::pair<Quad, float>> buckets[6];
+        for (const Quad &q : quads) {
+            Vec3 qn = ComputeQuadNormal(q, result.vertices);
+            PrincipalAxis pa = GetPrincipalAxis(qn);
+            float area = QuadArea(q, result.vertices);
+            buckets[pa].push_back({q, area});
+        }
+        for (int i = 0; i < 6; i++) {
+            std::sort(buckets[i].begin(), buckets[i].end(), [](const std::pair<Quad, float>& a, const std::pair<Quad, float>& b) {
+                return a.second > b.second;
+            });
+            size_t keepCount = std::min(buckets[i].size(), size_t(10));
+            for (size_t j = 0; j < keepCount; j++) {
+                filteredQuads.push_back(buckets[i][j].first);
+            }
+        }
+        result.quadsPerSubmesh.push_back(filteredQuads);
+    }
+    
+    CompactVertices(result);
+    
+    if (true /*result.vertices.size() > 32*/) {
+        std::vector<Quad> allQuads;
+        for (const auto &sub : result.quadsPerSubmesh) {
+            for (const auto &q : sub)
+                allQuads.push_back(q);
+        }
+        std::sort(allQuads.begin(), allQuads.end(), [&](const Quad &a, const Quad &b) {
+             return QuadArea(a, result.vertices) > QuadArea(b, result.vertices);
+        });
+        std::vector<Quad> selected;
+        std::set<int> unionIndices;
+        for (const Quad &q : allQuads) {
+             std::set<int> candidate = unionIndices;
+             candidate.insert(q.i0);
+             candidate.insert(q.i1);
+             candidate.insert(q.i2);
+             candidate.insert(q.i3);
+             if (candidate.size() <= 32) {
+                 selected.push_back(q);
+                 unionIndices = candidate;
+             }
+        }
+        result.quadsPerSubmesh.clear();
+        result.quadsPerSubmesh.push_back(selected);
+		CompactVertices(result);
+    }
+    
+    return result;
+}
+
 
 // Global vectors to store the scene data
 std::vector<texture_t*> textures;
@@ -607,6 +1152,7 @@ struct meshlet {
 };
 struct compressed_mesh_t {
 	Sphere bounding_sphere;
+	std::vector<uint8_t> quadData;
 	std::vector<uint8_t> data;
 };
 
@@ -685,6 +1231,51 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 			submesh->indices[i] = canonicalIdx[submesh->indices[i]];
 		}
 
+		if (false && submesh->index_count > 1500)
+		{
+			float target_error = 0.1f;
+			float threshold = 1500.0f/submesh->index_count;
+			auto& src = *submesh;
+			size_t ic = src.index_count;
+
+			// build input index vector
+			std::vector<unsigned int> inIndices(ic);
+			for (size_t j = 0; j < ic; ++j)
+				inIndices[j] = src.indices[j];
+
+			// prepare output buffer (max size = ic)
+			std::vector<unsigned int> outIndices(ic);
+			float lod_error = 0.f;
+
+			// target index count = floor(ic * threshold)
+			size_t target_ic = size_t(ic * threshold);
+			if (target_ic < 3) target_ic = 3; // at least one triangle
+
+			// run the simplifier
+			size_t new_ic = meshopt_simplify(
+				outIndices.data(),
+				inIndices.data(),
+				ic,
+				mesh->vertices,
+				mesh->vertex_count,
+				sizeof(float) * 3,
+				target_ic,
+				target_error,
+				&lod_error
+			);
+
+			// shrink to actual size
+			outIndices.resize(new_ic);
+
+			// allocate and copy back to uint16_t indices
+			submesh->index_count = new_ic;
+			free(submesh->indices);
+			submesh->indices     = (uint16_t*)malloc(sizeof(uint16_t)*new_ic);
+			for (size_t j = 0; j < new_ic; ++j)
+				submesh->indices[j] = uint16_t(outIndices[j]);
+
+			texconvf("Submesh %u: %zu→%zu indices (error=%f)\n", submeshNum, ic, new_ic, lod_error);
+		}
 		{
 			indices Indices(submesh->indices, submesh->indices + submesh->index_count);
 
@@ -918,7 +1509,69 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 
 	assert(dataPtr - meshlets.data() == dataSize);
 
-    return { boundingSphere, meshlets };
+	QuadMesh qm = GenerateConservativeQuads(mesh);
+
+	write_vector quadDataDesc;
+	write_vector quadDataVertex;
+	write_vector quadDataIndex;
+	assert(qm.quadsPerSubmesh.size() == 1);
+	auto quadDescSize = qm.quadsPerSubmesh.size() * 2 * 2;
+	auto quadIndexSize = 0;
+	for (auto& quads: qm.quadsPerSubmesh) {
+		quadIndexSize += quads.size() * 4 * 2;
+	}
+
+	auto quadVertexOffset = quadIndexSize + quadDescSize;
+	
+	// this is broken and only works for one global quad group, not per submesh
+	assert(qm.quadsPerSubmesh.size() == 1);
+	for (auto& quads: qm.quadsPerSubmesh) {
+		uint32_t offset = quadDescSize + quadDataIndex.size();
+		assert(offset <= INT16_MAX);
+		uint32_t size = quads.size();
+		assert(size <= INT8_MAX);
+
+		uint32_t vertexCount = qm.vertices.size();
+		assert(vertexCount <= INT8_MAX);
+
+		quadDataDesc.write<int16_t>(offset);
+		quadDataDesc.write<int8_t>(size);
+		quadDataDesc.write<int8_t>(vertexCount);
+
+		for (auto& quad: quads) {
+			uint32_t offset0 = quad.i0 * 3 * 4;
+			uint32_t offset1 = quad.i1 * 3 * 4;
+			uint32_t offset2 = quad.i2 * 3 * 4;
+			uint32_t offset3 = quad.i3 * 3 * 4;
+
+			assert(offset0 <= INT16_MAX);
+			assert(offset1 <= INT16_MAX);
+			assert(offset2 <= INT16_MAX);
+			assert(offset3 <= INT16_MAX);
+			quadDataIndex.write<int16_t>(offset0);
+			quadDataIndex.write<int16_t>(offset1);
+			quadDataIndex.write<int16_t>(offset2);
+			quadDataIndex.write<int16_t>(offset3);
+		}
+	}
+
+	for (auto& vtx: qm.vertices) {
+		quadDataVertex.write<float>(vtx.x);
+		quadDataVertex.write<float>(vtx.y);
+		quadDataVertex.write<float>(vtx.z);
+	}
+
+	assert(quadDataDesc.size() == quadDescSize);
+	assert(quadDataIndex.size() == quadIndexSize);
+	assert((quadDescSize & 3) == 0);
+	assert((quadIndexSize & 3) == 0);
+
+	std::vector<uint8_t> quadData(quadDataDesc.size() + quadDataIndex.size() + quadDataVertex.size());
+	memcpy(quadData.data(), quadDataDesc.data(), quadDataDesc.size());
+	memcpy(quadData.data() + quadDataDesc.size(), quadDataIndex.data(), quadDataIndex.size());
+	memcpy(quadData.data() + quadDataDesc.size() + quadDataIndex.size(), quadDataVertex.data(), quadDataVertex.size());
+	texconvf("Quad Data Size: %lu\n", quadData.size());
+    return { boundingSphere, quadData, meshlets };
 }
 
 int main(int argc, const char** argv) {
@@ -1028,13 +1681,16 @@ int main(int argc, const char** argv) {
         auto mesh_filename = ss.str();
 
         std::cout << "Processing mesh: " << mesh_filename << std::endl;
-
+		
         if (!std::filesystem::exists(mesh_filename)) {
             auto compressed_mesh = process_mesh(mesh);
             auto mesh_file = std::ofstream(mesh_filename);
 
-            mesh_file.write("DCUENM00", 8);
+            mesh_file.write("DCUENM01", 8);
             mesh_file.write((const char*)&compressed_mesh.bounding_sphere, sizeof(compressed_mesh.bounding_sphere));
+			uint32_t tmp = compressed_mesh.quadData.size();
+			mesh_file.write((const char*)&tmp, sizeof(tmp));
+			mesh_file.write((const char*)compressed_mesh.quadData.data(), compressed_mesh.quadData.size());
             mesh_file.write((const char*)compressed_mesh.data.data(), compressed_mesh.data.size());
         }
 
@@ -1042,7 +1698,7 @@ int main(int argc, const char** argv) {
 			auto mesh_file = std::ifstream(mesh_filename);
 			char tag[9] = { 0 };
 			mesh_file.read(tag, 8);
-			if (memcmp(tag, "DCUENM00", 8) != 0) {
+			if (memcmp(tag, "DCUENM01", 8) != 0) {
 				std::cout << "Unexpeted mesh tag " << tag << std::endl;
 				return 1;
 			}
@@ -1052,9 +1708,14 @@ int main(int argc, const char** argv) {
 			auto mesh_size = (size_t)mesh_file.tellg() - 8;
 			mesh_file.seekg(8, std::ios::beg);
 
-			mesh.data.resize(mesh_size - sizeof(mesh.bounding_sphere));
-
+			
 			mesh_file.read((char*)&mesh.bounding_sphere, sizeof(mesh.bounding_sphere));
+			uint32_t quadDataSize;
+			mesh_file.read((char*)&quadDataSize, sizeof(quadDataSize));
+			mesh.quadData.resize(quadDataSize);
+			mesh_file.read((char*)mesh.quadData.data(), mesh.quadData.size());
+			
+			mesh.data.resize(mesh_size - sizeof(mesh.bounding_sphere) - quadDataSize);
 			mesh_file.read((char*)mesh.data.data(), mesh.data.size());
 
 			native_meshes_map[hash_result] = native_meshes.size();
@@ -1067,7 +1728,7 @@ int main(int argc, const char** argv) {
 
 	auto outfile = std::ofstream(argv[2]);
 
-    outfile.write("DCUENS01", 8);
+    outfile.write("DCUENS02", 8);
     
 	uint32_t tmp;
 
@@ -1105,9 +1766,12 @@ int main(int argc, const char** argv) {
 	tmp = (uint32_t)native_meshes.size();
 	outfile.write((char*)&tmp, sizeof(tmp));
 	for (auto& native_mesh: native_meshes) {
+		tmp = native_mesh.quadData.size();
+		outfile.write((char*)&tmp, sizeof(tmp));
 		tmp = native_mesh.data.size();
 		outfile.write((char*)&tmp, sizeof(tmp));
 		outfile.write((char*)&native_mesh.bounding_sphere, sizeof(native_mesh.bounding_sphere));
+		outfile.write((char*)native_mesh.quadData.data(), native_mesh.quadData.size());
 		outfile.write((char*)native_mesh.data.data(), native_mesh.data.size());
 	}
 

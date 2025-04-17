@@ -218,6 +218,16 @@ RP3D_FORCE_INLINE bool AABB::contains(const Vector3& point, decimal epsilon) con
 RP3D_FORCE_INLINE void AABB::applyScale(const Vector3& scale) {
     mMinCoordinates = mMinCoordinates * scale;
     mMaxCoordinates = mMaxCoordinates * scale;
+
+    if (scale.x < 0)  {
+        std::swap(mMinCoordinates.x, mMaxCoordinates.x);
+    }
+    if (scale.y < 0)  {
+        std::swap(mMinCoordinates.y, mMaxCoordinates.y);
+    }
+    if (scale.z < 0)  {
+        std::swap(mMinCoordinates.z, mMaxCoordinates.z);
+    }
 }
 
 // Merge the AABB in parameter with the current one

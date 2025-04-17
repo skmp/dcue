@@ -64,7 +64,7 @@ void ConcaveMeshShape::computeScaledVerticesNormals() {
         Vector3 normal = mTriangleMesh->getVertexNormal(v);
 
         // Scale the normal
-        normal = Vector3(1.0 / mScale.x, 1.0 / mScale.y, 1.0 / mScale.z) * normal;
+        normal = Vector3(1.0 / fabsf(mScale.x), 1.0 / fabsf(mScale.y), 1.0 / fabsf(mScale.z)) * normal;
 
         // Normalize the normal
         const decimal normalLength = normal.length();

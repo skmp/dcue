@@ -79,7 +79,7 @@ class Transform {
         void setToIdentity();
 
         /// Set the transform from an OpenGL transform matrix
-        void setFromOpenGL(decimal* openglMatrix);
+        void setFromOpenGL(decimal* openglMatrix, Vector3& scale);
 
         /// Get the OpenGL matrix of the transform
         void getOpenGLMatrix(decimal* openglMatrix) const;

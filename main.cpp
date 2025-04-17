@@ -31,6 +31,11 @@
 
 #include "dcue/coroutines.h"
 
+#if defined(DC_SIM)
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "vendor/stb/stb_image_write.h"
+#endif
+
 float timeDeltaTime;
 
 // #define DEBUG_PHYSICS
@@ -279,7 +284,7 @@ bool loadScene(const char* scene) {
     // Read and verify header (8 bytes)
     char header[9] = { 0};
     in.read(header, 8);
-    if (strncmp(header, "DCUENS01", 8) != 0) {
+    if (strncmp(header, "DCUENS02", 8) != 0) {
         std::cout << "Invalid file header: " << header << std::endl;
         return false;
     }
@@ -326,10 +331,13 @@ bool loadScene(const char* scene) {
     in.read(reinterpret_cast<char*>(&meshCount), sizeof(meshCount));
     meshes.resize(meshCount);
     for (uint32_t i = 0; i < meshCount; ++i) {
+		uint32_t quadDataSize;
+		in.read(reinterpret_cast<char*>(&quadDataSize), sizeof(quadDataSize));
         in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp));
         auto mesh = meshes[i] = (mesh_t*)malloc(sizeof(mesh_t) + tmp);
-
         in.read((char*)&mesh->bounding_sphere, sizeof(mesh->bounding_sphere));
+		mesh->quadData = (uint8_t*)malloc(quadDataSize);
+		in.read(reinterpret_cast<char*>(mesh->quadData), quadDataSize);
         in.read(reinterpret_cast<char*>(mesh->data), tmp);
     }
 
@@ -1880,6 +1888,11 @@ float GetMaxScale(const r_matrix_t& mat) {
 game_object_t* pointedGameObject = nullptr;
 #endif
 
+static float zBuffer[32][32];
+#if defined(DC_SIM)
+unsigned total_idx;
+#endif
+
 template<int list>
 void renderMesh(camera_t* cam, game_object_t* go) {
     if (vertexBufferFree() < freeVertexTarget) {
@@ -1902,6 +1915,101 @@ void renderMesh(camera_t* cam, game_object_t* go) {
     } else {
         // printf("Needs local clip (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
     }
+
+	{
+		mat_load(&cam->devViewProjScreen);
+		mat_apply((matrix_t*)&go->ltw);
+		float cx = go->mesh->bounding_sphere.center.x;
+		float cy = go->mesh->bounding_sphere.center.y;
+		float cz = go->mesh->bounding_sphere.center.z;
+		float r  = go->mesh->bounding_sphere.radius;
+
+		float v[3 * 8] = {
+			// bottom face (z = cz - r)
+			cx - r, cy - r, cz - r,  // corner 0
+			cx + r, cy - r, cz - r,  // corner 1
+			cx + r, cy + r, cz - r,  // corner 2
+			cx - r, cy + r, cz - r,  // corner 3
+
+			// top face   (z = cz + r)
+			cx - r, cy - r, cz + r,  // corner 4
+			cx + r, cy - r, cz + r,  // corner 5
+			cx + r, cy + r, cz + r,  // corner 6
+			cx - r, cy + r, cz + r   // corner 7
+		};
+
+		for (unsigned i = 0; i < 8; i++) {
+			float z;
+			mat_trans_nodiv_nomod(v[i*3 + 0], v[i*3 + 1], v[i*3 + 2], v[i*3 + 0], v[i*3 + 1], z, v[i*3 + 2]);
+			(void)z;
+			if (v[i*3 + 0] <= 0) {
+				goto skip_test; // needs clipping let's just skip for now
+			}
+
+			v[i*3 + 2] = 1/v[i*3 + 2];
+			v[i*3 + 0] *= v[i*3 + 2];
+			v[i*3 + 1] *= v[i*3 + 2];
+		}
+
+		float minX =  FLT_MAX;
+		float maxX = -FLT_MAX;
+		float minY =  FLT_MAX;
+		float maxY = -FLT_MAX;
+		float maxZ = -FLT_MAX;
+
+		for (int i = 0; i < 8; ++i) {
+			float x = v[i*3 + 0];
+			float y = v[i*3 + 1];
+			float z = v[i*3 + 2];
+
+			if (x < minX) minX = x;
+			if (x > maxX) maxX = x;
+			if (y < minY) minY = y;
+			if (y > maxY) maxY = y;
+			if (z > maxZ) maxZ = z;
+		}
+
+		if (minX < 0) minX = 0;
+		if (minX > 639) minX = 639;
+		if (minY < 0) minY = 0;
+		if (minY > 479) minY = 479;
+		if (maxX < 0) maxX = 0;
+		if (maxX > 639) maxX = 639;
+		if (maxY < 0) maxY = 0;
+		if (maxY > 479) maxY = 479;
+
+		if (minX >= maxX || minY >= maxY) {
+			// std::cout << "Not visible in screen space" << std::endl;
+		}
+
+		unsigned iMinX = minX/20.f;
+		unsigned iMaxX = (maxX + 19.99f)/20.f;
+		if (iMaxX == 32) { iMaxX--; }
+
+		unsigned iMinY = minY/16.f;
+		unsigned iMaxY = (maxY + 15.99f)/16.f;
+		if (iMaxY == 32) { iMaxY--; }
+
+		#if defined(DC_SIM)
+		assert(iMinX>=0 && iMaxX<=32);
+		assert(iMinY>=0 && iMaxY<=32);
+		#endif
+
+		// std::cout << "RECT: " << iMinX << ", "<< iMinY << " ~ " << iMaxX << ", " << iMaxY << " z=" << maxZ << std::endl;
+
+		for (unsigned y = iMinY; y <= iMaxY; y++) {
+			for (unsigned x = iMinX; x <= iMaxX; x++) {
+				if (zBuffer[y][x] < maxZ) {
+					goto skip_test; // failed test, skip the rest of it
+				}
+			}
+		}
+		
+		// std::cout << " occluded" << std::endl;
+		return;
+	}
+	skip_test:
+	
 
     auto cntDiffuse = 1;
     r_matrix_t invLtw;
@@ -1952,7 +2060,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 PVR_CLRFMT_4FLOATS,
                 list != PVR_LIST_OP_POLY ? PVR_BLEND_SRCALPHA : PVR_BLEND_ONE,
                 list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
-                PVR_DEPTHCMP_GREATER,
+                PVR_DEPTHCMP_GEQUAL,
                 PVR_DEPTHWRITE_ENABLE,
                 PVR_CULLING_SMALL,
                 PVR_FOG_DISABLE
@@ -1965,7 +2073,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 PVR_CLRFMT_4FLOATS,
                 list != PVR_LIST_OP_POLY ? PVR_BLEND_SRCALPHA : PVR_BLEND_ONE,
                 list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
-                PVR_DEPTHCMP_GREATER,
+                PVR_DEPTHCMP_GEQUAL,
                 PVR_DEPTHWRITE_ENABLE,
                 PVR_CULLING_SMALL,
                 PVR_FOG_DISABLE
@@ -2010,6 +2118,10 @@ void renderMesh(camera_t* cam, game_object_t* go) {
         for (unsigned meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
             auto meshlet = (const MeshletInfo*)meshletInfoBytes;
             meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
+
+			#if defined(DC_SIM)
+			total_idx += meshlet->indexCount;
+			#endif
 
             unsigned clippingRequired = 0;
 
@@ -2123,6 +2235,532 @@ void renderMesh(camera_t* cam, game_object_t* go) {
         }
     }
 }
+
+// Helper function: returns true if the point (x, y) is inside the convex quad
+// defined by vertices v0, v1, v2, v3 (assumed ordered).
+bool IsPointInsideQuad(float x, float y,
+					   const V3d *v0, const V3d *v1,
+					   const V3d *v2, const V3d *v3)
+{
+	// Compute cross product for each edge.
+	// For edge from v0 to v1
+	float cross0 = (v1->x - v0->x) * (y - v0->y) - (v1->y - v0->y) * (x - v0->x);
+	// For edge from v1 to v2
+	float cross1 = (v2->x - v1->x) * (y - v1->y) - (v2->y - v1->y) * (x - v1->x);
+	// For edge from v2 to v3
+	float cross2 = (v3->x - v2->x) * (y - v2->y) - (v3->y - v2->y) * (x - v2->x);
+	// For edge from v3 to v0
+	float cross3 = (v0->x - v3->x) * (y - v3->y) - (v0->y - v3->y) * (x - v3->x);
+
+	// If the point is inside the quad, then all cross products must have the same sign.
+	if ((cross0 >= 0.0f && cross1 >= 0.0f && cross2 >= 0.0f && cross3 >= 0.0f) ||
+		(cross0 <= 0.0f && cross1 <= 0.0f && cross2 <= 0.0f && cross3 <= 0.0f))
+	{
+		return true;
+	}
+	return false;
+}
+
+// Helper function: returns true if the axis-aligned quad defined by
+// snappedLeft, snappedTop, snappedRight, snappedBottom is fully contained
+// within the convex quad defined by vertices v0, v1, v2, v3.
+bool ValidateSnappedQuadContained(float snappedLeft, float snappedTop,
+								  float snappedRight, float snappedBottom,
+								  const V3d *v0, const V3d *v1,
+								  const V3d *v2, const V3d *v3)
+{
+	// Define the four corners of the snapped quad.
+	// Assuming screen-space coordinates where (snappedLeft, snappedTop) is the top-left, etc.
+	float x0 = snappedLeft, y0 = snappedTop;	 // top-left
+	float x1 = snappedRight, y1 = snappedTop;	 // top-right
+	float x2 = snappedLeft, y2 = snappedBottom;	 // bottom-left
+	float x3 = snappedRight, y3 = snappedBottom; // bottom-right
+
+	// Validate each corner.
+	bool contained = true;
+	contained = contained && IsPointInsideQuad(x0, y0, v0, v1, v2, v3);
+	contained = contained && IsPointInsideQuad(x1, y1, v0, v1, v2, v3);
+	contained = contained && IsPointInsideQuad(x2, y2, v0, v1, v2, v3);
+	contained = contained && IsPointInsideQuad(x3, y3, v0, v1, v2, v3);
+
+	assert(contained);
+	return contained;
+}
+
+bool IsQuadConvex(const V3d* v0, const V3d* v1, const V3d* v2, const V3d* v3)
+{
+    // Utility lambda to compute the 2D cross product of two vectors (ignoring z).
+    auto Cross2D = [](float ax, float ay, float bx, float by) -> float {
+        return ax * by - ay * bx;
+    };
+
+    // Compute the vectors for each edge.
+    float dx0 = v1->x - v0->x;
+    float dy0 = v1->y - v0->y;
+    
+    float dx1 = v2->x - v1->x;
+    float dy1 = v2->y - v1->y;
+    
+    float dx2 = v3->x - v2->x;
+    float dy2 = v3->y - v2->y;
+    
+    float dx3 = v0->x - v3->x;
+    float dy3 = v0->y - v3->y;
+    
+    // Compute cross products for each consecutive edge pair.
+    float cross0 = Cross2D(dx0, dy0, dx1, dy1);
+    float cross1 = Cross2D(dx1, dy1, dx2, dy2);
+    float cross2 = Cross2D(dx2, dy2, dx3, dy3);
+    float cross3 = Cross2D(dx3, dy3, dx0, dy0);
+    
+    // The quad is convex if all cross products are either non-negative or non-positive.
+    bool allNonNegative = (cross0 >= 0.0f && cross1 >= 0.0f && cross2 >= 0.0f && cross3 >= 0.0f);
+    bool allNonPositive = (cross0 <= 0.0f && cross1 <= 0.0f && cross2 <= 0.0f && cross3 <= 0.0f);
+    
+    return (allNonNegative || allNonPositive);
+}
+
+void renderQuads(camera_t* cam, game_object_t* go) {
+	{
+		mat_load(&cam->devViewProjScreen);
+		mat_apply((matrix_t*)&go->ltw);
+
+		// std::cout << "mesh: " << go->mesh << std::endl;
+		
+		int16_t quadOffset = *(int16_t*)go->mesh->quadData;
+		int8_t quadCount = go->mesh->quadData[2];
+		int8_t vtxCount = go->mesh->quadData[3];
+		
+		// std::cout << "quads: " << quadOffset << " num " << quadCount << " verts " << (int)vtxCount << std::endl;
+
+		V3d* srcVtx = (V3d*)(quadOffset + quadCount * 8 + go->mesh->quadData);
+		V3d* dstVtx = (V3d*)OCR_SPACE;
+		// float *zBuffer = (float*)(OCR_SPACE + (32 * 12));
+		
+		do {
+			float x, y, z, w;
+			mat_trans_nodiv_nomod(srcVtx->x, srcVtx->y, srcVtx->z, x, y, z, w);
+			(void)z;
+
+			w = 1/w;
+
+			x*= w;
+			y*= w;
+
+			dstVtx->x = x;
+			dstVtx->y = y;
+			dstVtx->z = w;
+
+			srcVtx++;
+			dstVtx++;
+		} while(--vtxCount);
+		
+		int16_t* quadIndex = (int16_t*)(go->mesh->quadData + quadOffset);
+		uint8_t* transVtx = OCR_SPACE;
+		int16_t cIndex;
+		pvr_vertex32_ut vtx[4];
+		for (size_t quadIdx = 0; quadIdx < quadCount*4; quadIdx+=4) {
+			// submit quad
+			
+			const V3d* cVtx0 = (V3d*)(transVtx+quadIndex[quadIdx + 0]);
+			const V3d* cVtx1 = (V3d*)(transVtx+quadIndex[quadIdx + 1]);
+			const V3d* cVtx2 = (V3d*)(transVtx+quadIndex[quadIdx + 2]);
+			const V3d* cVtx3 = (V3d*)(transVtx+quadIndex[quadIdx + 3]);
+
+			if (cVtx0->z <= 0) continue;
+			if (cVtx1->z <= 0) continue;
+			if (cVtx2->z <= 0) continue;
+			if (cVtx3->z <= 0) continue;
+
+			float minX = cVtx0->x;
+			if(cVtx1->x < minX) minX = cVtx1->x;
+			if(cVtx2->x < minX) minX = cVtx2->x;
+			if(cVtx3->x < minX) minX = cVtx3->x;
+			if (minX < 0) minX = 0;
+
+			float maxX = cVtx0->x;
+			if(cVtx1->x > maxX) maxX = cVtx1->x;
+			if(cVtx2->x > maxX) maxX = cVtx2->x;
+			if(cVtx3->x > maxX) maxX = cVtx3->x;
+			if (maxX > 639) maxX = 639;
+
+			float minY = cVtx0->y;
+			if(cVtx1->y < minY) minY = cVtx1->y;
+			if(cVtx2->y < minY) minY = cVtx2->y;
+			if(cVtx3->y < minY) minY = cVtx3->y;
+			if (minY < 0) minY = 0;
+
+			float maxY = cVtx0->y;
+			if(cVtx1->y > maxY) maxY = cVtx1->y;
+			if(cVtx2->y > maxY) maxY = cVtx2->y;
+			if(cVtx3->y > maxY) maxY = cVtx3->y;
+			if (maxY > 479) maxY = 479;
+
+			if (minX >= maxX || minY>=maxY) {
+				continue;
+			}
+
+			float sum1 = cVtx0->x * cVtx1->y +
+						  cVtx1->x * cVtx2->y +
+						  cVtx2->x * cVtx3->y +
+						  cVtx3->x * cVtx0->y;
+
+			float sum2 = cVtx0->y * cVtx1->x +
+						  cVtx1->y * cVtx2->x +
+						  cVtx2->y * cVtx3->x +
+						  cVtx3->y * cVtx0->x;
+
+			float areax2 = sum1 - sum2;
+			if (fabsf(areax2) < 8192) continue;
+
+			// std::cout << "Quad Area " << fabsf(areax2 * 0.5f) << std::endl;
+
+			const float Y1 = cVtx0->y;
+			const float Y2 = cVtx1->y;
+			const float Y3 = cVtx2->y;
+			const float Y4 = cVtx3->y;
+		
+			const float X1 = cVtx0->x;
+			const float X2 = cVtx1->x;
+			const float X3 = cVtx2->x;
+			const float X4 = cVtx3->x;
+
+			float DX12 = (X1 - X2);
+			float DX23 = (X2 - X3);
+			float DX31 = (X3 - X4);
+			float DX41 = (X4 - X1);
+		
+			float DY12 = (Y1 - Y2);
+			float DY23 = (Y2 - Y3);
+			float DY31 = (Y3 - Y4);
+			float DY41 = (Y4 - Y1);
+
+			if (areax2 > 0) {
+				DX12 = (X2 - X1);
+				DX23 = (X3 - X2);
+				DX31 = (X4 - X3);
+				DX41 = (X1 - X4);
+			
+				DY12 = (Y2 - Y1);
+				DY23 = (Y3 - Y2);
+				DY31 = (Y4 - Y3);
+				DY41 = (Y1 - Y4);
+			}
+
+			float C1 = DY12 * X1 - DX12 * Y1;
+			float C2 = DY23 * X2 - DX23 * Y2;
+			float C3 = DY31 * X3 - DX31 * Y3;
+			float C4 = DY41 * X4 - DX41 * Y4;
+
+			float det = cVtx0->x * (cVtx1->y - cVtx2->y) +
+						cVtx1->x * (cVtx2->y - cVtx0->y) +
+						cVtx2->x * (cVtx0->y - cVtx1->y);
+			
+			float absDet = (det < 0.0f) ? -det : det;
+			if (absDet < 0.001f) {
+				// std::cout << "Cannot compute a valid plane from quad vertices.\n";
+				continue;
+			}
+			float A = (cVtx0->z * (cVtx1->y - cVtx2->y) +
+					cVtx1->z * (cVtx2->y - cVtx0->y) +
+					cVtx2->z * (cVtx0->y - cVtx1->y)) / det;
+			float B = (cVtx0->z * (cVtx2->x - cVtx1->x) +
+					cVtx1->z * (cVtx0->x - cVtx2->x) +
+					cVtx2->z * (cVtx1->x - cVtx0->x)) / det;
+			float C = (cVtx0->z * (cVtx1->x * cVtx2->y - cVtx2->x * cVtx1->y) +
+					cVtx1->z * (cVtx2->x * cVtx0->y - cVtx0->x * cVtx2->y) +
+					cVtx2->z * (cVtx0->x * cVtx1->y - cVtx1->x * cVtx0->y)) / det;
+
+			unsigned iMinX = minX/20.f;
+			unsigned iMaxX = (maxX + 19.99f)/20.f;
+			if (iMaxX == 32) { iMaxX--; }
+
+			unsigned iMinY = minY/16.f;
+			unsigned iMaxY = (maxY + 15.99f)/16.f;
+			if (iMaxY == 32) { iMaxY--; }
+
+			#if defined(DC_SIM)
+			assert(iMinX>=0 && iMaxX<=32);
+			assert(iMinY>=0 && iMaxY<=32);
+			#endif
+			static matrix_t inQuadMtx;
+
+			inQuadMtx[0][0] = -DY12;
+			inQuadMtx[0][1] = -DY23;
+			inQuadMtx[0][2] = -DY31;
+			inQuadMtx[0][3] = -DY41;
+
+			inQuadMtx[1][0] = DX12;
+			inQuadMtx[1][1] = DX23;
+			inQuadMtx[1][2] = DX31;
+			inQuadMtx[1][3] = DX41;
+
+			inQuadMtx[2][0] = C1;
+			inQuadMtx[2][1] = C2;
+			inQuadMtx[2][2] = C3;
+			inQuadMtx[2][3] = C4;
+
+			mat_load(&inQuadMtx);
+
+			float fy = iMinY * 16;
+			for (unsigned y = iMinY; y <= iMaxY; y++, fy+=16)
+			{
+				float fx = iMinX * 20;
+				for (unsigned x = iMinX; x <= iMaxX; x++, fx+=20)
+				{
+					float x_ps = fx;
+					float y_ps = fy;
+
+					float Xhs12;
+					float Xhs23;
+					float Xhs31;
+					float Xhs41;
+					
+					mat_trans_nodiv_nomod(x_ps, y_ps, 1, Xhs12, Xhs23, Xhs31, Xhs41);
+
+					bool inQuad = Xhs12 >= 0 && Xhs23 >= 0 && Xhs31 >= 0 && Xhs41 >= 0;
+
+					if (!inQuad) {
+						continue;
+					}
+
+					float zTL = A * x_ps  + B * y_ps + C;
+
+					x_ps = fx + 20;
+					y_ps = fy;
+					
+					mat_trans_nodiv_nomod(x_ps, y_ps, 1, Xhs12, Xhs23, Xhs31, Xhs41);
+
+					inQuad = Xhs12 >= 0 && Xhs23 >= 0 && Xhs31 >= 0 && Xhs41 >= 0;
+					if (!inQuad) {
+						continue;
+					}
+
+					float zTR = A * x_ps  + B * y_ps + C;
+
+					x_ps = fx;
+					y_ps = fy + 16;
+					
+					mat_trans_nodiv_nomod(x_ps, y_ps, 1, Xhs12, Xhs23, Xhs31, Xhs41);
+
+					inQuad = Xhs12 >= 0 && Xhs23 >= 0 && Xhs31 >= 0 && Xhs41 >= 0;
+					if (!inQuad) {
+						continue;
+					}
+					float zBL = A * x_ps  + B * y_ps + C;
+
+					x_ps = fx + 20;
+					y_ps = fy + 16;
+					
+					mat_trans_nodiv_nomod(x_ps, y_ps, 1, Xhs12, Xhs23, Xhs31, Xhs41);
+
+					inQuad = Xhs12 >= 0 && Xhs23 >= 0 && Xhs31 >= 0 && Xhs41 >= 0;
+					if (!inQuad) {
+						continue;
+					}
+					float zBR = A * x_ps  + B * y_ps + C;
+
+
+					float minZ = zTL;
+					if(zTR < minZ)
+						minZ = zTR;
+					if(zBL < minZ)
+						minZ = zBL;
+					if(zBR < minZ)
+						minZ = zBR;
+
+					if (minZ < 0) {
+						continue;
+					}
+
+					#if defined(DC_SIM)
+					ValidateSnappedQuadContained(fx, fy, fx+19, fy+15, cVtx0, cVtx1, cVtx2, cVtx3);
+					#endif
+					if (zBuffer[y][x] < minZ) {
+						zBuffer[y][x] = minZ;
+					}
+				}
+			}
+		}
+	}
+}
+
+// assert(IsQuadConvex(cVtx0, cVtx1, cVtx2, cVtx3));
+
+// /// --- Compute bounding box manually ---
+// float minX = cVtx0->x;
+// if(cVtx1->x < minX) minX = cVtx1->x;
+// if(cVtx2->x < minX) minX = cVtx2->x;
+// if(cVtx3->x < minX) minX = cVtx3->x;
+// if (minX < 0) minX = 0;
+
+// float maxX = cVtx0->x;
+// if(cVtx1->x > maxX) maxX = cVtx1->x;
+// if(cVtx2->x > maxX) maxX = cVtx2->x;
+// if(cVtx3->x > maxX) maxX = cVtx3->x;
+// if (maxX > 640) maxX = 640;
+
+// float minY = cVtx0->y;
+// if(cVtx1->y < minY) minY = cVtx1->y;
+// if(cVtx2->y < minY) minY = cVtx2->y;
+// if(cVtx3->y < minY) minY = cVtx3->y;
+// if (minY < 0) minY = 0;
+
+// float maxY = cVtx0->y;
+// if(cVtx1->y > maxY) maxY = cVtx1->y;
+// if(cVtx2->y > maxY) maxY = cVtx2->y;
+// if(cVtx3->y > maxY) maxY = cVtx3->y;
+// if (maxY > 480) maxY = 480;
+
+// if (minX >= maxX | minY>=maxY) {
+// 	continue;
+// }
+// std::cout << "Quad: " << areax2 << std::endl;
+// // At this point, (insLeft, insTop) and (insRight, insBottom)
+// // define an axis–aligned rectangle guaranteed to be contained within the quad.
+
+// // 2. Clip the bounding box to the screen: 0 <= x <= 640 and 0 <= y <= 480.
+// if(minX < 0.0f)
+// 	minX = 0.0f;
+// if(minY < 0.0f)
+// 	minY = 0.0f;
+// if(maxX > 640.0f)
+// 	maxX = 640.0f;
+// if(maxY > 480.0f)
+// 	maxY = 480.0f;
+
+// // 3. Snap the clipped bounding box to a 32x16 grid.
+// // Tile dimensions:
+// constexpr uint32_t tileWidth  = 32;
+// constexpr uint32_t tileHeight = 16;
+
+// // For left and top we want the smallest grid multiple that is >= the coordinate.
+// uint32_t iLeft = (uint32_t)(minX / tileWidth);
+// if ((float)iLeft * tileWidth < minX)
+// 	iLeft++; // round up if needed.
+// uint32_t snappedLeft = iLeft * tileWidth;
+
+// uint32_t iTop = (uint32_t)(minY / tileHeight);
+// if ((float)iTop * tileHeight < minY)
+// 	iTop++;
+// uint32_t snappedTop = iTop * tileHeight;
+
+// // For right and bottom we need a full tile to fit in the bounding box.
+// // So we require that a cell starting at L (or T) fits entirely, meaning L + tileWidth <= maxX.
+// if(maxX < tileWidth || maxY < tileHeight) {
+// 	// std::cout << "Quad rejected: insufficient tile coverage.\n";
+// 	// return;
+// 	continue;
+// }
+
+// // Compute the maximum grid cell starting position that still allows a full tile.
+// // Since values are nonnegative, simple integer division works as floor.
+// uint32_t iRight = (uint32_t)((maxX - tileWidth) / tileWidth);
+// uint32_t snappedRight = iRight * tileWidth + tileWidth;
+
+// uint32_t iBottom = (uint32_t)((maxY - tileHeight) / tileHeight);
+// uint32_t snappedBottom = iBottom * tileHeight + tileHeight;
+
+// // Validate that the snapped quad covers at least one full tile.
+// if (snappedLeft >= snappedRight || snappedTop >= snappedBottom) {
+// 	// std::cout << "Quad rejected: insufficient tile coverage.\n";
+// 	// return;
+// 	continue;
+// }
+
+// // 4. Compute the plane for depth interpolation: z(x, y) = A*x + B*y + C.
+// // Using vertices cVtx0, cVtx1, and cVtx2.
+// float det = cVtx0->x * (cVtx1->y - cVtx2->y) +
+// 			cVtx1->x * (cVtx2->y - cVtx0->y) +
+// 			cVtx2->x * (cVtx0->y - cVtx1->y);
+// // Inline absolute value.
+// float absDet = (det < 0.0f) ? -det : det;
+// if (absDet < 0.000001f) {
+// 	// std::cout << "Cannot compute a valid plane from quad vertices.\n";
+// 	continue;
+// }
+// float A = (cVtx0->z * (cVtx1->y - cVtx2->y) +
+// 		cVtx1->z * (cVtx2->y - cVtx0->y) +
+// 		cVtx2->z * (cVtx0->y - cVtx1->y)) / det;
+// float B = (cVtx0->z * (cVtx2->x - cVtx1->x) +
+// 		cVtx1->z * (cVtx0->x - cVtx2->x) +
+// 		cVtx2->z * (cVtx1->x - cVtx0->x)) / det;
+// float C = (cVtx0->z * (cVtx1->x * cVtx2->y - cVtx2->x * cVtx1->y) +
+// 		cVtx1->z * (cVtx2->x * cVtx0->y - cVtx0->x * cVtx2->y) +
+// 		cVtx2->z * (cVtx0->x * cVtx1->y - cVtx1->x * cVtx0->y)) / det;
+
+// // 5. Evaluate depth (z) at the snapped quad corners.
+// float zTL = A * snappedLeft  + B * snappedTop    + C;
+// float zTR = A * snappedRight + B * snappedTop    + C;
+// float zBL = A * snappedLeft  + B * snappedBottom + C;
+// float zBR = A * snappedRight + B * snappedBottom + C;
+
+// // 6. Find the minimum depth value.
+// float minZ = zTL;
+// if(zTR < minZ)
+// 	minZ = zTR;
+// if(zBL < minZ)
+// 	minZ = zBL;
+// if(zBR < minZ)
+// 	minZ = zBR;
+
+// if (minZ < 0) {
+// 	continue;
+// }
+
+// std::cout << "Quad: " << snappedLeft << ", " << snappedTop << " ~ " << snappedRight << ", " << snappedBottom << " minZ: " << minZ << std::endl;
+
+// assert(minX <= snappedLeft);
+// assert(minY <= snappedTop);
+// assert(maxX >= snappedRight);
+// assert(maxY >= snappedBottom);
+
+// assert(ValidateSnappedQuadContained(snappedLeft, snappedTop, snappedRight, snappedBottom, cVtx0, cVtx1, cVtx2, cVtx3));
+
+// // std::cout << "Minimum depth (z) value in the snapped quad: " << minZ << "\n";
+// uint8_t* rgb = (uint8_t*)&go->mesh;
+
+// vtx[0].flags = PVR_CMD_VERTEX;
+// vtx[0].x = snappedLeft;
+// vtx[0].y = snappedTop;
+// vtx[0].z = minZ;
+// vtx[0].a = 0.2f;
+// vtx[0].r = minZ * 10;
+// vtx[0].g = minZ * 10;
+// vtx[0].b = minZ * 10;
+
+// vtx[1].flags = PVR_CMD_VERTEX;
+// vtx[1].x = snappedRight;
+// vtx[1].y = snappedTop;
+// vtx[1].z = minZ;
+// vtx[1].a = 0.2f;
+// vtx[1].r = minZ * 10;
+// vtx[1].g = minZ * 10;
+// vtx[1].b = minZ * 10;
+
+// vtx[2].flags = PVR_CMD_VERTEX;
+// vtx[2].x = snappedLeft;
+// vtx[2].y = snappedBottom;
+// vtx[2].z = minZ;
+// vtx[2].a = 0.2f;
+// vtx[2].r = minZ * 10;
+// vtx[2].g = minZ * 10;
+// vtx[2].b = minZ * 10;
+
+// vtx[3].flags = PVR_CMD_VERTEX_EOL; // End of triangle strip
+// vtx[3].x = snappedRight;
+// vtx[3].y = snappedBottom;
+// vtx[3].z = minZ;
+// vtx[3].a = 0.2f;
+// vtx[3].r = minZ * 10;
+// vtx[3].g = minZ * 10;
+// vtx[3].b = minZ * 10;
+
+
+// pvr_prim(vtx, sizeof(pvr_vertex32_ut));
+// pvr_prim(vtx + 1, sizeof(pvr_vertex32_ut));
+// pvr_prim(vtx + 2, sizeof(pvr_vertex32_ut));
+// pvr_prim(vtx + 3, sizeof(pvr_vertex32_ut));	
 
 // extern "C" cus also used by KOS
 extern "C" const char* getExecutableTag() {
@@ -2463,12 +3101,13 @@ Task zoom_in_out_t::doAnimation() {
 }
 void zoom_in_out_t::interact() {
 	reactphysics3d::Transform targetTransform;
-	targetTransform.setFromOpenGL(&gameObjects[targetIndex]->ltw.m00);
+	reactphysics3d::Vector3 scale3d;
+	targetTransform.setFromOpenGL(&gameObjects[targetIndex]->ltw.m00, scale3d);
 	targetPosition = targetTransform.getPosition();
 	targetRotation = targetTransform.getOrientation();
 
 	reactphysics3d::Transform finalTransform;
-	finalTransform.setFromOpenGL(&gameObjects[cameraIndex]->ltw.m00);
+	finalTransform.setFromOpenGL(&gameObjects[cameraIndex]->ltw.m00, scale3d);
 	finalPosition = finalTransform.getPosition();
 	finalRotation = finalTransform.getOrientation();
 
@@ -2847,6 +3486,34 @@ void teleporter_t::teleport() {
 	}
 }
 
+V3d ComputeAxisAlignedScaleSigned(const r_matrix_t* mtx) {
+	// 1) grab the three **world‑space basis** columns
+	V3d Bx = mtx->right;
+	V3d By = mtx->up;
+	V3d Bz = mtx->at;
+
+	// 2) lengths = |sx|,|sy|,|sz|
+	float sx = length(Bx);
+	float sy = length(By);
+	float sz = length(Bz);
+
+	// guard
+	if (sx == 0 || sy == 0 || sz == 0)
+		return {0, 0, 0};
+
+	// 3) normalized axes
+	V3d x = {Bx.x / sx, Bx.y / sx, Bx.z / sx};
+	V3d y = {By.x / sy, By.y / sy, By.z / sy};
+	V3d z = {Bz.x / sz, Bz.y / sz, Bz.z / sz};
+
+	// 4) triple‐product sign tests
+	float signX = (dot(cross(y, z), x) >= 0.f) ? +1.f : -1.f;
+	float signY = (dot(cross(z, x), y) >= 0.f) ? +1.f : -1.f;
+	float signZ = (dot(cross(x, y), z) >= 0.f) ? +1.f : -1.f;
+
+	return {sx * signX, sy * signY, sz * signZ};
+}
+
 V3d ComputeAxisAlignedScale(const r_matrix_t* mtx) {
     V3d scale;
 	scale.x = sqrt(mtx->right.x * mtx->right.x + mtx->right.y * mtx->right.y + mtx->right.z * mtx->right.z);
@@ -2877,10 +3544,11 @@ void box_collider_t::update(float deltaTime) {
 	mat_store(&localOffset);
 	
 	reactphysics3d::Transform t;
-	t.setFromOpenGL(&localOffset[0][0]);
+	reactphysics3d::Vector3 scale3d;
+	t.setFromOpenGL(&localOffset[0][0], scale3d);
 	rigidBody->setTransform(t);
 
-	V3d scale = ComputeAxisAlignedScale(&gameObject->ltw);
+	V3d scale = {fabsf(scale3d.x), fabsf(scale3d.y), fabsf(scale3d.z)};
 	//V3d scale = { std::abs(gameObject->scale.x), std::abs(gameObject->scale.y), std::abs(gameObject->scale.z)};
 	if (lastScale != scale || boxShape == nullptr) {
 		if (collider) {
@@ -2916,10 +3584,11 @@ void sphere_collider_t::update(float deltaTime) {
 	mat_store(&localOffset);
 
 	reactphysics3d::Transform t;
-	t.setFromOpenGL(&localOffset[0][0]);
+	reactphysics3d::Vector3 scale3d;
+	t.setFromOpenGL(&localOffset[0][0], scale3d);
 	rigidBody->setTransform(t);
 
-	V3d scale3 = ComputeAxisAlignedScale(&gameObject->ltw);
+	V3d scale3 = {fabsf(scale3d.x), fabsf(scale3d.y), fabsf(scale3d.z)};
 	float scale = std::max(scale3.x, std::max(scale3.y, scale3.z));
 	if (lastScale != scale3 || sphereShape == nullptr) {
 		if (collider) {
@@ -2955,10 +3624,11 @@ void capsule_collider_t::update(float deltaTime) {
 	mat_store(&localOffset);
 
 	reactphysics3d::Transform t;
-	t.setFromOpenGL(&localOffset[0][0]);
+	reactphysics3d::Vector3 scale3d;
+	t.setFromOpenGL(&localOffset[0][0], scale3d);
 	rigidBody->setTransform(t);
-
-	V3d scale3 = ComputeAxisAlignedScale(&gameObject->ltw);
+	
+	V3d scale3 = { fabsf(scale3d.x), fabsf(scale3d.y), fabsf(scale3d.z) };
 	V2d scale = V2d(std::max(scale3.x, scale3.z), scale3.y);
 
 	if (lastScale != scale3 || capsuleShape == nullptr) {
@@ -2987,10 +3657,11 @@ void mesh_collider_t::update(float deltaTime) {
 	}
 
 	reactphysics3d::Transform t;
-	t.setFromOpenGL(&gameObject->ltw.m00);
+	reactphysics3d::Vector3 scale3d;
+	t.setFromOpenGL(&gameObject->ltw.m00, scale3d);
 	rigidBody->setTransform(t);
 
-	V3d scale = ComputeAxisAlignedScale(&gameObject->ltw);
+	V3d scale = { scale3d.x, scale3d.y, scale3d.z };
 	
 	if (lastScale != scale || meshShape == nullptr) {
 		if (indexCount == 0 || vertexCount == 0) {
@@ -3287,6 +3958,13 @@ void physicsUpdate(float deltaTime) {
 	
 	physicsWorld->update(deltaTime);
 }
+
+#if defined(DEBUG_PHYSICS)
+bool drawphys;
+#else
+constexpr bool drawphys = false;
+#endif
+
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -3509,18 +4187,47 @@ int main(int argc, const char** argv) {
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_OP_POLY);
 
-        for (auto& go: gameObjects) {
+		memset(zBuffer, 0, sizeof(zBuffer));
+		#if defined(DC_SIM)
+		total_idx = 0;
+		#endif
+
+		for (auto& go: gameObjects) {
             if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
-                renderMesh<PVR_LIST_OP_POLY>(currentCamera, go);
+				renderQuads(currentCamera, go);
             }
         }
+
+        for (auto& go: gameObjects) {
+            if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
+                if (!drawphys) renderMesh<PVR_LIST_OP_POLY>(currentCamera, go);
+            }
+        }
+		
+		#if defined(DC_SIM)
+		std::cout << total_idx << std::endl;
+		#endif
+
+		#if defined(DC_SIM)
+		uint8_t pixBuffer[32][32];
+		for (int y = 0; y < 32; y++) {
+			for (int x = 0; x < 32; x++) {
+				float v = zBuffer[y][x] * 3 * 255;
+				if (v > 255) v = 255;
+				if (v != 0 && v < 32) v = 32;
+				pixBuffer[y][x] = v;
+			}
+		}
+		stbi_write_bmp("/home/skmp/projects/dcue/build/zbuffer.bmp",32,32,1,pixBuffer);
+		#endif
+		
         pvr_list_finish();
 
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_TR_POLY);
         for (auto& go: gameObjects) {
 			if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha != 1) {
-				renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
+				if (!drawphys) renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
             }
         }
 
@@ -3536,119 +4243,121 @@ int main(int argc, const char** argv) {
 			drawTextCentered(&fonts_19, 40, 320, 240, lookAtMessage, 1, 1, 0.1, 0.1);
 		}
 		#if defined(DEBUG_PHYSICS)
-		pvr_poly_hdr_t hdr;
-		pvr_poly_cxt_col_fast(
-			&hdr,
-			PVR_LIST_TR_POLY,
-			PVR_CLRFMT_4FLOATS,
-			PVR_BLEND_SRCALPHA,
-			PVR_BLEND_INVSRCALPHA,
-			PVR_DEPTHCMP_GREATER,
-			PVR_DEPTHWRITE_ENABLE,
-			PVR_CULLING_NONE,
-			PVR_FOG_DISABLE
-		);
-		pvr_prim(&hdr, sizeof(hdr));
+		if (drawphys) {
+			pvr_poly_hdr_t hdr;
+			pvr_poly_cxt_col_fast(
+				&hdr,
+				PVR_LIST_TR_POLY,
+				PVR_CLRFMT_4FLOATS,
+				PVR_BLEND_SRCALPHA,
+				PVR_BLEND_INVSRCALPHA,
+				PVR_DEPTHCMP_GEQUAL,
+				PVR_DEPTHWRITE_ENABLE,
+				PVR_CULLING_NONE,
+				PVR_FOG_DISABLE
+			);
+			pvr_prim(&hdr, sizeof(hdr));
 
-		mat_load(&currentCamera->devViewProjScreen);
-		for (int lineNum = 0; lineNum < debugRenderer.getNbLines(); lineNum++) {
-			auto lines = debugRenderer.getLinesArray();
+			mat_load(&currentCamera->devViewProjScreen);
+			for (int lineNum = 0; lineNum < debugRenderer.getNbLines(); lineNum++) {
+				auto lines = debugRenderer.getLinesArray();
 
-			auto line = lines[lineNum];
+				auto line = lines[lineNum];
 
-			float ignored;
-			pvr_vertex32_ut vtx[4];
-			vtx[0].flags = PVR_CMD_VERTEX;
-			mat_trans_nodiv_nomod(line.point1.x, line.point1.y, line.point1.z, vtx[0].x, vtx[0].y, ignored, vtx[0].z);
-			vtx[0].x /= vtx[0].z;
-			vtx[0].y /= vtx[0].z;
-			vtx[0].z = 1/vtx[0].z;
-			vtx[0].a = 0.5f;
-			vtx[0].r = 1;
-			vtx[0].g = 1;
-			vtx[0].b = 1;
+				float ignored;
+				pvr_vertex32_ut vtx[4];
+				vtx[0].flags = PVR_CMD_VERTEX;
+				mat_trans_nodiv_nomod(line.point1.x, line.point1.y, line.point1.z, vtx[0].x, vtx[0].y, ignored, vtx[0].z);
+				vtx[0].x /= vtx[0].z;
+				vtx[0].y /= vtx[0].z;
+				vtx[0].z = 1/vtx[0].z;
+				vtx[0].a = 0.5f;
+				vtx[0].r = 1;
+				vtx[0].g = 1;
+				vtx[0].b = 1;
 
-			vtx[1].flags = PVR_CMD_VERTEX;
-			mat_trans_nodiv_nomod(line.point2.x, line.point2.y, line.point2.z, vtx[1].x, vtx[1].y, ignored, vtx[1].z);
-			vtx[1].x /= vtx[1].z;
-			vtx[1].y /= vtx[1].z;
-			vtx[1].z = 1/vtx[1].z;
-			vtx[1].a = 0.5f;
-			vtx[1].r = 1;
-			vtx[1].g = 1;
-			vtx[1].b = 1;
+				vtx[1].flags = PVR_CMD_VERTEX;
+				mat_trans_nodiv_nomod(line.point2.x, line.point2.y, line.point2.z, vtx[1].x, vtx[1].y, ignored, vtx[1].z);
+				vtx[1].x /= vtx[1].z;
+				vtx[1].y /= vtx[1].z;
+				vtx[1].z = 1/vtx[1].z;
+				vtx[1].a = 0.5f;
+				vtx[1].r = 1;
+				vtx[1].g = 1;
+				vtx[1].b = 1;
 
-			// Extend to generate a triangle strip
-			vtx[2].flags = PVR_CMD_VERTEX;
-			vtx[2].x = vtx[0].x + 3.f; // Offset for quad
-			vtx[2].y = vtx[0].y + 3.f;
-			vtx[2].z = vtx[0].z;
-			vtx[2].a = 0.5f;
-			vtx[2].r = 1;
-			vtx[2].g = 1;
-			vtx[2].b = 1;
+				// Extend to generate a triangle strip
+				vtx[2].flags = PVR_CMD_VERTEX;
+				vtx[2].x = vtx[0].x + 3.f; // Offset for quad
+				vtx[2].y = vtx[0].y + 3.f;
+				vtx[2].z = vtx[0].z;
+				vtx[2].a = 0.5f;
+				vtx[2].r = 1;
+				vtx[2].g = 1;
+				vtx[2].b = 1;
 
-			vtx[3].flags = PVR_CMD_VERTEX_EOL; // End of triangle strip
-			vtx[3].x = vtx[1].x + 3.f; // Offset for quad
-			vtx[3].y = vtx[1].y + 3.f;
-			vtx[3].z = vtx[1].z;
-			vtx[3].a = 0.5f;
-			vtx[3].r = 1;
-			vtx[3].g = 1;
-			vtx[3].b = 1;
+				vtx[3].flags = PVR_CMD_VERTEX_EOL; // End of triangle strip
+				vtx[3].x = vtx[1].x + 3.f; // Offset for quad
+				vtx[3].y = vtx[1].y + 3.f;
+				vtx[3].z = vtx[1].z;
+				vtx[3].a = 0.5f;
+				vtx[3].r = 1;
+				vtx[3].g = 1;
+				vtx[3].b = 1;
 
-			if (vtx[0].z < 0 || vtx[1].z < 0) {
-				continue;
-			}
-			pvr_prim(vtx, sizeof(pvr_vertex32_ut));
-			pvr_prim(vtx + 1, sizeof(pvr_vertex32_ut));
-			pvr_prim(vtx + 2, sizeof(pvr_vertex32_ut));
-			pvr_prim(vtx + 3, sizeof(pvr_vertex32_ut));
-		}
-
-		for (int triangleNum = 0; triangleNum < debugRenderer.getNbTriangles(); triangleNum++) {
-			auto triangles = debugRenderer.getTrianglesArray();
-			auto triangle = triangles[triangleNum];
-			float ignored;
-			pvr_vertex32_ut vtx[3];
-
-			mat_trans_nodiv_nomod(triangle.point1.x, triangle.point1.y, triangle.point1.z, vtx[0].x, vtx[0].y, ignored, vtx[0].z);
-			vtx[0].x /= vtx[0].z;
-			vtx[0].y /= vtx[0].z;
-			vtx[0].z = 1/vtx[0].z + 1;
-			vtx[0].a = 0.1f;
-			vtx[0].r = 1;
-			vtx[0].g = 1;
-			vtx[0].b = 1;
-
-			mat_trans_nodiv_nomod(triangle.point2.x, triangle.point2.y, triangle.point2.z, vtx[1].x, vtx[1].y, ignored, vtx[1].z);
-			vtx[1].x /= vtx[1].z;
-			vtx[1].y /= vtx[1].z;
-			vtx[1].z = 1/vtx[1].z + 1;
-			vtx[1].a = 0.1f;
-			vtx[1].r = 1;
-			vtx[1].g = 1;
-			vtx[1].b = 1;
-
-			mat_trans_nodiv_nomod(triangle.point3.x, triangle.point3.y, triangle.point3.z, vtx[2].x, vtx[2].y, ignored, vtx[2].z);
-			vtx[2].x /= vtx[2].z;
-			vtx[2].y /= vtx[2].z;
-			vtx[2].z = 1/vtx[2].z + 1;
-			vtx[2].a = 0.1f;
-			vtx[2].r = 1;
-			vtx[2].g = 1;
-			vtx[2].b = 1;
-			vtx[0].flags = PVR_CMD_VERTEX;
-			vtx[1].flags = PVR_CMD_VERTEX;
-			vtx[2].flags = PVR_CMD_VERTEX_EOL;
-
-			if (vtx[0].z < 0 || vtx[1].z < 0 || vtx[2].z < 0) {
-				continue;
+				if (vtx[0].z < 0 || vtx[1].z < 0) {
+					continue;
+				}
+				pvr_prim(vtx, sizeof(pvr_vertex32_ut));
+				pvr_prim(vtx + 1, sizeof(pvr_vertex32_ut));
+				pvr_prim(vtx + 2, sizeof(pvr_vertex32_ut));
+				pvr_prim(vtx + 3, sizeof(pvr_vertex32_ut));
 			}
 
-			pvr_prim(vtx, sizeof(pvr_vertex32_ut));
-			pvr_prim(vtx + 1, sizeof(pvr_vertex32_ut));
-			pvr_prim(vtx + 2, sizeof(pvr_vertex32_ut));
+			for (int triangleNum = 0; triangleNum < debugRenderer.getNbTriangles(); triangleNum++) {
+				auto triangles = debugRenderer.getTrianglesArray();
+				auto triangle = triangles[triangleNum];
+				float ignored;
+				pvr_vertex32_ut vtx[3];
+
+				mat_trans_nodiv_nomod(triangle.point1.x, triangle.point1.y, triangle.point1.z, vtx[0].x, vtx[0].y, ignored, vtx[0].z);
+				vtx[0].x /= vtx[0].z;
+				vtx[0].y /= vtx[0].z;
+				vtx[0].z = 1/vtx[0].z + 1;
+				vtx[0].a = 0.1f;
+				vtx[0].r = 1;
+				vtx[0].g = 1;
+				vtx[0].b = 1;
+
+				mat_trans_nodiv_nomod(triangle.point2.x, triangle.point2.y, triangle.point2.z, vtx[1].x, vtx[1].y, ignored, vtx[1].z);
+				vtx[1].x /= vtx[1].z;
+				vtx[1].y /= vtx[1].z;
+				vtx[1].z = 1/vtx[1].z + 1;
+				vtx[1].a = 0.1f;
+				vtx[1].r = 1;
+				vtx[1].g = 1;
+				vtx[1].b = 1;
+
+				mat_trans_nodiv_nomod(triangle.point3.x, triangle.point3.y, triangle.point3.z, vtx[2].x, vtx[2].y, ignored, vtx[2].z);
+				vtx[2].x /= vtx[2].z;
+				vtx[2].y /= vtx[2].z;
+				vtx[2].z = 1/vtx[2].z + 1;
+				vtx[2].a = 0.1f;
+				vtx[2].r = 1;
+				vtx[2].g = 1;
+				vtx[2].b = 1;
+				vtx[0].flags = PVR_CMD_VERTEX;
+				vtx[1].flags = PVR_CMD_VERTEX;
+				vtx[2].flags = PVR_CMD_VERTEX_EOL;
+
+				if (vtx[0].z < 0 || vtx[1].z < 0 || vtx[2].z < 0) {
+					continue;
+				}
+
+				pvr_prim(vtx, sizeof(pvr_vertex32_ut));
+				pvr_prim(vtx + 1, sizeof(pvr_vertex32_ut));
+				pvr_prim(vtx + 2, sizeof(pvr_vertex32_ut));
+			}
 		}
 		#endif
         if (vertexOverflown()) {
