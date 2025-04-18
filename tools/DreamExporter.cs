@@ -11,6 +11,9 @@ using System.Linq;
 using UnityEngine.UI;
 using Bolt;
 using Pavo.Behaviors;
+using System.Runtime.InteropServices;
+using static UnityEditor.Progress;
+using Ludiq;
 
 namespace PseudoPavo
 {
@@ -111,6 +114,28 @@ public class DreamExporter : MonoBehaviour
             this.type = type;
         }
     }
+    [MenuItem("Dreamcast/MeshInfo")]
+    public static void LogMeshSizes()
+    {
+        var ds = CollectScene();
+
+        ds.meshList.Sort( (a, b) => a.mesh.vertexCount - b.mesh.vertexCount );
+
+        foreach (var mesh in ds.meshList)
+        {
+            Debug.Log(mesh.mesh.name + " " + mesh.mesh.vertexCount);
+
+            foreach (var go in ds.gameObjects)
+            {
+                var comp = go.GetComponent<MeshFilter>();
+                if (comp != null && comp.sharedMesh == mesh.mesh)
+                {
+                    Debug.Log(go.name);
+                }
+            }
+        }
+    }
+
     [MenuItem("Dreamcast/Export FlowMachines")]
     public static void ProcessFlowMachines()
     {
@@ -399,17 +424,181 @@ public class DreamExporter : MonoBehaviour
         sb.AppendLine("};");
         File.WriteAllText("fonts.cpp", sb.ToString());
     }
+
+    // Axis-Aligned Bounding Box
+    public struct AABB
+    {
+        public Vector3 Min;
+        public Vector3 Max;
+
+        public AABB(Vector3 min, Vector3 max)
+        {
+            Min = min;
+            Max = max;
+        }
+
+        // Expand bounds to include a point
+        public void Expand(Vector3 point)
+        {
+            Min = Vector3.Min(Min, point);
+            Max = Vector3.Max(Max, point);
+        }
+
+        // Diagonal length of the box
+        public float DiagonalLength()
+        {
+            return Vector3.Distance(Min, Max);
+        }
+
+        // Build bounds from a subset of triangles
+        public static AABB FromTriangles(List<Vector3> vertices, List<int> triangles, List<int> triIndices)
+        {
+            var b = new AABB(new Vector3(float.MaxValue, float.MaxValue, float.MaxValue), new Vector3(float.MinValue, float.MinValue, float.MinValue));
+            foreach (int ti in triIndices)
+            {
+                int idx = ti * 3;
+                for (int j = 0; j < 3; j++)
+                {
+                    Vector3 v = vertices[(int)triangles[idx + j]];
+                    b.Expand(v);
+                }
+            }
+            return b;
+        }
+    }
+
+    // BVH Node class
+    public class BVHNode
+    {
+        public AABB Bounds;
+        public BVHNode Left;
+        public BVHNode Right;
+        public List<int> TriangleIndices;  // Non-null only for leaves
+
+        public bool IsLeaf => TriangleIndices != null;
+
+        // Leaf constructor
+        public BVHNode(AABB bounds, List<int> tris)
+        {
+            Bounds = bounds;
+            TriangleIndices = tris;
+        }
+
+        // Internal node constructor
+        public BVHNode(AABB bounds, BVHNode left, BVHNode right)
+        {
+            Bounds = bounds;
+            Left = left;
+            Right = right;
+            TriangleIndices = null;
+        }
+    }
+
+    // BVH Builder
+    public class BVHBuilder
+    {
+        private int maxLeafSize;
+        private float relativeThreshold;
+        private float splitThreshold;
+
+        private List<Vector3> vertices;
+        private List<int> triangles;
+        private List<Vector3> centroids;
+
+        public List<BVHNode> nodes;
+
+        /// <summary>
+        /// Builds a BVH with up to maxLeafSize triangles per leaf.
+        /// Leaves are also limited by a minimum node size threshold relative to the model diagonal.
+        /// </summary>
+        /// <param name="vertices">List of mesh vertices</param>
+        /// <param name="triangles">List of triangle indices (3 uints per triangle)</param>
+        /// <param name="relativeThreshold">Fraction of scene diagonal below which nodes will not split further</param>
+        /// <param name="maxLeafSize">Maximum number of triangles per leaf</param>
+        public BVHNode Build(
+            List<Vector3> vertices,
+            List<int> triangles,
+            float relativeThreshold = 0.01f,
+            int maxLeafSize = 32)
+        {
+            this.vertices = vertices;
+            this.triangles = triangles;
+            this.maxLeafSize = maxLeafSize;
+            this.relativeThreshold = relativeThreshold;
+
+            int triCount = triangles.Count / 3;
+            centroids = new List<Vector3>(triCount);
+            for (int i = 0; i < triCount; i++)
+            {
+                int idx = i * 3;
+                Vector3 v0 = vertices[(int)triangles[idx]];
+                Vector3 v1 = vertices[(int)triangles[idx + 1]];
+                Vector3 v2 = vertices[(int)triangles[idx + 2]];
+                centroids.Add((v0 + v1 + v2) / 3f);
+            }
+
+            // Compute scene bounds and threshold
+            var all = new List<int>(triCount);
+            for (int i = 0; i < triCount; i++) all.Add(i);
+            AABB sceneBounds = AABB.FromTriangles(vertices, triangles, all);
+            float sceneDiag = sceneBounds.DiagonalLength();
+            splitThreshold = sceneDiag * relativeThreshold;
+            nodes = new List<BVHNode>();
+            return BuildRecursive(all);
+        }
+
+        // Recursive BVH construction
+        private BVHNode BuildRecursive(List<int> triIndices)
+        {
+            AABB bounds = AABB.FromTriangles(vertices, triangles, triIndices);
+
+            // Stop condition: small triangle count or box is too small
+            if (triIndices.Count <= maxLeafSize || bounds.DiagonalLength() <= splitThreshold)
+            {
+                // Create a leaf node
+                var rv2 = new BVHNode(bounds, new List<int>(triIndices));
+                nodes.Add(rv2);
+                return rv2;
+            }
+
+            // Determine split axis (longest extent)
+            Vector3 extents = bounds.Max - bounds.Min;
+            int axis = 0;
+            if (extents.y > extents.x) axis = 1;
+            if (extents.z > extents[axis]) axis = 2;
+
+            // Sort triangles by centroid along chosen axis
+            triIndices.Sort((a, b) => centroids[a][axis].CompareTo(centroids[b][axis]));
+
+            // Split at median
+            int mid = triIndices.Count / 2;
+            var leftTris = triIndices.GetRange(0, mid);
+            var rightTris = triIndices.GetRange(mid, triIndices.Count - mid);
+
+            // Build children recursively
+            BVHNode leftNode = BuildRecursive(leftTris);
+            BVHNode rightNode = BuildRecursive(rightTris);
+
+            // Return internal node
+            var rv = new BVHNode(bounds, leftNode, rightNode);
+            nodes.Add(rv);
+            return rv;
+        }
+    }
+
     struct BakedMeshInfo
     {
         public int indicesId;
         public int verticesId;
         public int numTriangles;
         public int numVertices;
+        public int bvh;
     }
-    static BakedMeshInfo BakeCollisionMesh(Mesh mesh, Dictionary<string, int> all_indices, Dictionary<string, int> all_vertices)
+    static BakedMeshInfo BakeCollisionMesh(Mesh mesh, Dictionary<string, int> all_indices, Dictionary<string, int> all_vertices, Dictionary<string, int> all_bvhs)
     {
         var triangles = mesh.triangles;
         List<Vector3> vertices = new List<Vector3>(mesh.vertices);
+        List<Vector3> processedVerticesList = new List<Vector3>();
         Dictionary<Vector3, int> processedVertices = new Dictionary<Vector3, int>();
 
         var processedTriangles = new List<int>();
@@ -471,6 +660,7 @@ public class DreamExporter : MonoBehaviour
                 if (!processedVertices.ContainsKey(vertices[new_triangle[j]]))
                 {
                     processedVertices.Add(vertices[new_triangle[j]], processedVertices.Count);
+                    processedVerticesList.Add(vertices[new_triangle[j]]);
                 }
                 new_triangle[j] = processedVertices[vertices[new_triangle[j]]];
             }
@@ -481,9 +671,103 @@ public class DreamExporter : MonoBehaviour
             processedTriangles.Add(new_triangle[2]);
         }
 
+        if (processedTriangles.Count == 0)
+        {
+            BakedMeshInfo rv2;
+            rv2.indicesId =-1;
+            rv2.verticesId = -1;
+            rv2.numTriangles = -1;
+            rv2.numVertices = -1;
+            rv2.bvh = -1;
+            return rv2;
+        }
+        BVHBuilder bvh = new BVHBuilder();
+        var rootnode = bvh.Build(processedVerticesList, processedTriangles);
+
+        var leafs = bvh.nodes.Where(node => node.IsLeaf).ToList();
+        var interms = bvh.nodes.Where(node => !node.IsLeaf).ToList();
+        
+        StringBuilder sbvh = new StringBuilder();
+        Dictionary<BVHNode, int> leafIndex = new Dictionary<BVHNode, int>();
+        for (int leafNum = 0; leafNum < leafs.Count; leafNum++)
+        {
+            var leaf = leafs[leafNum];
+
+            leafIndex.Add(leaf, leafNum);
+
+            sbvh.Append($"int16_t BVH_LEAF_TRIS({leafNum})[] = {{ ");
+            for (int triNum = 0; triNum < leaf.TriangleIndices.Count; triNum++)
+            {
+                int idx = leaf.TriangleIndices[triNum] * 3;
+                sbvh.Append($"{processedTriangles[idx + 0]}, {processedTriangles[idx + 1]}, {processedTriangles[idx + 2]}, ");
+            }
+            sbvh.AppendLine("-1, };");
+        }
+        sbvh.Append($"bvh_leaf_t BVH_LEAFS()[] = {{ ");
+        for (int leafNum = 0; leafNum < leafs.Count; leafNum++)
+        {
+            var leaf = leafs[leafNum];
+            sbvh.Append($"{{ {{ {leaf.Bounds.Min.x}, {leaf.Bounds.Min.y}, {leaf.Bounds.Min.z} }}, ");
+            sbvh.Append($"{{ {leaf.Bounds.Max.x}, {leaf.Bounds.Max.y}, {leaf.Bounds.Max.z} }}, ");
+            sbvh.Append($"BVH_LEAF_TRIS({leafNum}), ");
+            sbvh.Append("}, ");
+        }
+        sbvh.AppendLine("};");
+
+        sbvh.Append($"bvh_interm_t BVH_INTERMS()[] = {{ ");
+        Dictionary<BVHNode, int> interimIndex = new Dictionary<BVHNode, int>();
+        for (int intermNum = 0; intermNum < interms.Count; intermNum++)
+        {
+            var interm = interms[intermNum];
+            interimIndex.Add(interm, intermNum);
+
+            sbvh.Append($"{{ {{ {interm.Bounds.Min.x}, {interm.Bounds.Min.y}, {interm.Bounds.Min.z} }}, ");
+            sbvh.Append($"{{ {interm.Bounds.Max.x}, {interm.Bounds.Max.y}, {interm.Bounds.Max.z} }}, ");
+            if (interm.Left != null)
+            {
+                if (leafIndex.ContainsKey(interm.Left))
+                    sbvh.Append($"&BVH_LEAF({leafIndex[interm.Left]}), ");
+                else
+                    sbvh.Append($"&BVH_INTERM({interimIndex[interm.Left]}), ");
+            }
+            else
+            {
+                sbvh.Append($"nullptr, ");
+            }
+            if (interm.Right != null)
+            {
+                if (leafIndex.ContainsKey(interm.Right))
+                    sbvh.Append($"&BVH_LEAF({leafIndex[interm.Right]}), ");
+                else
+                    sbvh.Append($"&BVH_INTERM({interimIndex[interm.Right]}), ");
+            }
+            else
+            {
+                sbvh.Append($"nullptr, ");
+            }
+            sbvh.Append("}, ");
+        }
+        sbvh.AppendLine("};");
+
+        if (rootnode.IsLeaf)
+        {
+            sbvh.AppendLine("bvh_t BVH() = { &BVH_LEAF(0), 0 };");
+        } 
+        else
+        {
+            sbvh.AppendLine($"bvh_t BVH() = {{ BVH_INTERMS(), {interms.Count} }};");
+        }
+        var stringified_bvh = sbvh.ToString();
+
+        if (!all_bvhs.ContainsKey(stringified_bvh))
+        {
+            all_bvhs.Add(stringified_bvh, all_bvhs.Count);
+        }
+
+
         var stringifiedTriangles = String.Join(", ", processedTriangles.ToArray());
         StringBuilder sb = new StringBuilder();
-        foreach (var vertex in processedVertices.Keys)
+        foreach (var vertex in processedVerticesList)
         {
             sb.Append($"{vertex.x}, {vertex.y}, {vertex.z}, ");
         }
@@ -504,6 +788,7 @@ public class DreamExporter : MonoBehaviour
         rv.verticesId = all_vertices[stringifiedVertices];
         rv.numTriangles = processedTriangles.Count;
         rv.numVertices = processedVertices.Count;
+        rv.bvh = all_bvhs[stringified_bvh];
         //Debug.Log($"Baked mesh {mesh.name} with {rv.numTriangles} triangles and {rv.numVertices} vertices");
         return rv;
     }
@@ -519,6 +804,7 @@ public class DreamExporter : MonoBehaviour
 
         var all_vertices = new Dictionary<string, int>();
         var all_indices = new Dictionary<string, int>();
+        var all_bvhs = new Dictionary<string, int>();
 
 
         StringBuilder meshCollidersStringBuilder = new StringBuilder();
@@ -577,14 +863,20 @@ public class DreamExporter : MonoBehaviour
 
         // mesh colliders
         meshCollidersStringBuilder.AppendLine();
+        
         for (int meshColliderNum = 0; meshColliderNum < ds.meshColliders.Count; meshColliderNum++)
         {
             var meshCollider = ds.meshColliders[meshColliderNum];
 
-            var bakedMeshInfo = BakeCollisionMesh(meshCollider.sharedMesh, all_indices, all_vertices);
+            var bakedMeshInfo = BakeCollisionMesh(meshCollider.sharedMesh, all_indices, all_vertices, all_bvhs);
 
+            if (bakedMeshInfo.bvh == -1)
+            {
+                ds.rejectedComponents.Add(meshCollider);
+                continue;
+            }
             meshCollidersStringBuilder.Append($"mesh_collider_t mesh_collider_{meshColliderNum} = {{ ");
-            meshCollidersStringBuilder.Append($"nullptr, collision_mesh_vertices_{bakedMeshInfo.verticesId}, collision_mesh_indices_{bakedMeshInfo.indicesId}, {bakedMeshInfo.numVertices}, {bakedMeshInfo.numTriangles}, ");
+            meshCollidersStringBuilder.Append($"nullptr, collision_mesh_vertices_{bakedMeshInfo.verticesId}, &BVH({bakedMeshInfo.bvh})");
             meshCollidersStringBuilder.AppendLine("};");
         }
 
@@ -593,7 +885,7 @@ public class DreamExporter : MonoBehaviour
         for (int meshColliderNum = 0; meshColliderNum < ds.meshColliders.Count; meshColliderNum++)
         {
             var meshCollider = ds.meshColliders[meshColliderNum];
-            if (meshCollider.sharedMesh == null)
+            if (meshCollider.sharedMesh == null || ds.rejectedComponents.Contains(meshCollider))
             {
                 continue;
             }
@@ -607,13 +899,27 @@ public class DreamExporter : MonoBehaviour
             sb.AppendLine($"static float collision_mesh_vertices_{vertices.Value}[] = {{ {vertices.Key} }};");
         }
 
+
         sb.AppendLine();
-        foreach (var indices in all_indices)
+        foreach (var bvh in all_bvhs)
         {
-            sb.AppendLine($"static uint16_t collision_mesh_indices_{indices.Value}[] = {{ {indices.Key} }};");
+            sb.AppendLine($"#define BVH() bvh_{bvh.Value}");
+            sb.AppendLine($"#define BVH_LEAF_TRIS(ln) bvh_{bvh.Value}_leafs_##ln");
+            sb.AppendLine($"#define BVH_LEAFS() bvh_{bvh.Value}_leafs");
+            sb.AppendLine($"#define BVH_INTERMS() bvh_{bvh.Value}_interims");
+            sb.AppendLine($"#define BVH_LEAF(ln) bvh_{bvh.Value}_leafs[ln]");
+            sb.AppendLine($"#define BVH_INTERM(in) bvh_{bvh.Value}_interims[in]");
+            sb.AppendLine(bvh.Key);
+            sb.AppendLine($"#undef BVH");
+            sb.AppendLine($"#undef BVH_LEAF_TRIS");
+            sb.AppendLine($"#undef BVH_LEAFS");
+            sb.AppendLine($"#undef BVH_INTERMS");
+            sb.AppendLine($"#undef BVH_LEAF");
+            sb.AppendLine($"#undef BVH_INTERM");
         }
 
         sb.AppendLine();
+        sb.AppendLine($"#define BVH(nm) bvh_##nm");
         sb.AppendLine(meshCollidersStringBuilder.ToString());
 
         File.WriteAllText("physics.cpp", sb.ToString());
@@ -668,7 +974,7 @@ public class DreamExporter : MonoBehaviour
         for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
         {
             var gameObject = ds.gameObjects[gameObjectNum];
-            var components = gameObject.GetComponents<T>();
+            var components = gameObject.GetComponents<T>().Where(component => !ds.rejectedComponents.Contains(component)).ToArray();
 
             if (components.Length != 0)
             {
@@ -676,10 +982,6 @@ public class DreamExporter : MonoBehaviour
                 for (int componentNum = 0; componentNum < components.Length; componentNum++)
                 {
                     var component = components[componentNum];
-                    if (ds.rejectedComponents.Contains(component))
-                    {
-                        continue;
-                    }
                     sb.Append($"&{componentName}_{componentIndex[component]}, ");
                 }
                 sb.AppendLine("nullptr, };");
@@ -691,7 +993,10 @@ public class DreamExporter : MonoBehaviour
         for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
         {
             var gameObject = ds.gameObjects[gameObjectNum];
-            var components = gameObject.GetComponents<IInteraction>().Where(x => supportedInteractionTypes.ContainsKey(x.GetType())).ToArray();
+            var components = gameObject.GetComponents<IInteraction>()
+                .Where(x => supportedInteractionTypes.ContainsKey(x.GetType()))
+                .Where(component => !ds.rejectedComponents.Contains(component))
+                .ToArray();
 
             bool sort = components.Any(x => x.Index != 0);
             if (sort)
@@ -704,10 +1009,6 @@ public class DreamExporter : MonoBehaviour
                 for (int componentNum = 0; componentNum < components.Length; componentNum++)
                 {
                     var component = components[componentNum];
-                    if (ds.rejectedComponents.Contains(component))
-                    {
-                        continue;
-                    }
                     
                     sb.Append($"&{supportedInteractionTypes[component.GetType()]}_{interactionsIndex[component]}, ");
                 }
@@ -725,16 +1026,16 @@ public class DreamExporter : MonoBehaviour
             List<string> components = new List<string>();
 
             // components
-            if (gameObject.GetComponent<Animator>() != null) components.Add("animator");
-            if (gameObject.GetComponent<Camera>() != null) components.Add("camera");
+            if (gameObject.GetComponents<Animator>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("animator");
+            if (gameObject.GetComponents<Camera>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("camera");
 
             // scripts
-            if (gameObject.GetComponent<ProximityInteractable>() != null) components.Add("proximity_interactable");
-            if (gameObject.GetComponent<PlayerMovement2>() != null) components.Add("player_movement");
-            if (gameObject.GetComponent<MouseLook>() != null) components.Add("mouse_look");
-            if (gameObject.GetComponent<Interactable>() != null) components.Add("interactable");
-            if (gameObject.GetComponent<Telepotrter>() != null) components.Add("teleporter");
-            if (gameObject.GetComponent<Bolt.FlowMachine>() != null) components.Add("pavo_interactable");
+            if (gameObject.GetComponents<ProximityInteractable>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("proximity_interactable");
+            if (gameObject.GetComponents<PlayerMovement2>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("player_movement");
+            if (gameObject.GetComponents<MouseLook>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("mouse_look");
+            if (gameObject.GetComponents<Interactable>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("interactable");
+            if (gameObject.GetComponents<Telepotrter>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("teleporter");
+            if (gameObject.GetComponents<Bolt.FlowMachine>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("pavo_interactable");
 
             // interactions
             bool hasInteractions = false;
@@ -754,10 +1055,10 @@ public class DreamExporter : MonoBehaviour
             }
 
             // physics
-            if (gameObject.GetComponent<BoxCollider>() != null) components.Add("box_collider");
-            if (gameObject.GetComponent<SphereCollider>() != null) components.Add("sphere_collider");
-            if (gameObject.GetComponent<CapsuleCollider>() != null) components.Add("capsule_collider");
-            if (gameObject.GetComponent<MeshCollider>() != null) components.Add("mesh_collider");
+            if (gameObject.GetComponents<BoxCollider>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("box_collider");
+            if (gameObject.GetComponents<SphereCollider>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("sphere_collider");
+            if (gameObject.GetComponents<CapsuleCollider>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("capsule_collider");
+            if (gameObject.GetComponents<MeshCollider>().Any(component => !ds.rejectedComponents.Contains(component))) components.Add("mesh_collider");
 
             sb.Append($"static component_t components_{gameObjectNum}[] = {{ ");
             foreach(var component in components)
@@ -1031,6 +1332,13 @@ public class DreamExporter : MonoBehaviour
     {
         DreamScene ds = CollectScene();
 
+        ProcessAnimations(ds);
+        ProcessCameras(ds);
+
+        ProcessScripts(ds);
+
+        ProcessPhysics(ds);
+
         StringBuilder sb = new StringBuilder();
 
         sb.AppendLine("#include \"components.h\"");
@@ -1097,13 +1405,6 @@ public class DreamExporter : MonoBehaviour
         sb.AppendLine("}");
 
         File.WriteAllText("components.cpp", sb.ToString());
-
-        ProcessAnimations(ds);
-        ProcessCameras(ds);
-
-        ProcessScripts(ds);
-
-        ProcessPhysics(ds);
     }
     enum AnimationPropertyType
     {

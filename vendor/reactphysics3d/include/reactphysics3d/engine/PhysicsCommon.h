@@ -42,6 +42,7 @@
 #include <reactphysics3d/collision/PolygonVertexArray.h>
 #include <reactphysics3d/collision/VertexArray.h>
 
+struct bvh_t;
 /// ReactPhysics3D namespace
 namespace reactphysics3d {
 
@@ -221,7 +222,7 @@ class PhysicsCommon {
         void destroyHeightFieldShape(HeightFieldShape* heightFieldShape);
 
         /// Create and return a concave mesh shape
-        ConcaveMeshShape* createConcaveMeshShape(TriangleMesh* triangleMesh, const Vector3& scaling = Vector3(1, 1, 1));
+        ConcaveMeshShape* createConcaveMeshShape(float* vertices, bvh_t* bvh);
 
         /// Destroy a concave mesh shape
         void destroyConcaveMeshShape(ConcaveMeshShape* concaveMeshShape);

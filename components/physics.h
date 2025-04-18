@@ -13,6 +13,25 @@ namespace native {
     struct game_object_t;
 }
 
+// bvhs
+struct bvh_leaf_t {
+    V3d min;
+    V3d max;
+    int16_t* triangles;
+};
+
+struct bvh_interm_t {
+    V3d min;
+    V3d max;
+    void* left;
+    void* right;
+};
+
+struct bvh_t {
+    void* root;
+    int32_t count;
+};
+
 
 struct box_collider_t {
     static constexpr component_type_t componentType = ct_box_collider;
@@ -67,9 +86,7 @@ struct mesh_collider_t {
     native::game_object_t* gameObject;
 
     float* vertices;
-    uint16_t* indices;
-    uint16_t vertexCount;
-    uint16_t indexCount;
+    bvh_t* bvh;
 
     reactphysics3d::TriangleMesh* triangleMesh;
     reactphysics3d::RigidBody* rigidBody;
@@ -84,3 +101,4 @@ extern box_collider_t* box_colliders[];
 extern sphere_collider_t* sphere_colliders[];
 extern capsule_collider_t* capsule_colliders[];
 extern mesh_collider_t* mesh_colliders[];
+

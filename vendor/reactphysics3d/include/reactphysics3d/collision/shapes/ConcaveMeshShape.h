@@ -31,6 +31,8 @@
 #include <reactphysics3d/collision/broadphase/DynamicAABBTree.h>
 #include <reactphysics3d/containers/Array.h>
 
+struct bvh_t;
+
 namespace reactphysics3d {
 
 // Declarations
@@ -130,7 +132,8 @@ class ConcaveMeshShape : public ConcaveShape {
         // -------------------- Attributes -------------------- //
 
         /// Pointer to the triangle mesh
-        TriangleMesh* mTriangleMesh;
+        Vector3* vertices;
+        bvh_t* bvh;
 
         /// Reference to the triangle half-edge structure
         HalfEdgeStructure& mTriangleHalfEdgeStructure;
@@ -139,7 +142,7 @@ class ConcaveMeshShape : public ConcaveShape {
         // -------------------- Methods -------------------- //
 
         /// Constructor
-        ConcaveMeshShape(TriangleMesh* triangleMesh, MemoryAllocator& allocator, HalfEdgeStructure& triangleHalfEdgeStructure, const Vector3& scaling = Vector3(1, 1, 1));
+        ConcaveMeshShape(float* vertices, bvh_t* bvh, MemoryAllocator& allocator, HalfEdgeStructure& triangleHalfEdgeStructure, const Vector3& scaling = Vector3(1, 1, 1));
 
         /// Raycast method with feedback information
         virtual bool raycast(const Ray& ray, RaycastInfo& raycastInfo, Collider* collider, MemoryAllocator& allocator) const override;
@@ -151,7 +154,7 @@ class ConcaveMeshShape : public ConcaveShape {
         void initBVHTree();
 
         /// Compute the shape Id for a given triangle of the mesh
-        uint32 computeTriangleShapeId(uint32 triangleIndex) const;
+        // uint32 computeTriangleShapeId(uint32 triangleIndex) const;
 
         /// Compute all the triangles of the mesh that are overlapping with the AABB in parameter
         virtual void computeOverlappingTriangles(const AABB& localAABB, Array<Vector3>& triangleVertices,
@@ -221,29 +224,29 @@ RP3D_FORCE_INLINE size_t ConcaveMeshShape::getSizeInBytes() const {
 // Called when a overlapping node has been found during the call to
 // DynamicAABBTree:reportAllShapesOverlappingWithAABB()
 RP3D_FORCE_INLINE void ConvexTriangleAABBOverlapCallback::notifyOverlappingNode(int nodeId) {
+    assert(false);
+    // // Get the node data (triangle index and mesh subpart index)
+    // int32 data = mConcaveMeshShape.getDynamicAABBTreeNodeDataInt(nodeId);
 
-    // Get the node data (triangle index and mesh subpart index)
-    int32 data = mConcaveMeshShape.getDynamicAABBTreeNodeDataInt(nodeId);
+    // // Get the triangle vertices for this node from the concave mesh shape
+    // Vector3 trianglePoints[3];
+    // mConcaveMeshShape.getTriangleVertices(data, trianglePoints[0], trianglePoints[1], trianglePoints[2]);
 
-    // Get the triangle vertices for this node from the concave mesh shape
-    Vector3 trianglePoints[3];
-    mConcaveMeshShape.getTriangleVertices(data, trianglePoints[0], trianglePoints[1], trianglePoints[2]);
+    // // Get the vertices normals of the triangle
+    // Vector3 verticesNormals[3];
+    // // mConcaveMeshShape.getTriangleVerticesNormals(data, verticesNormals[0], verticesNormals[1], verticesNormals[2]);
 
-    // Get the vertices normals of the triangle
-    Vector3 verticesNormals[3];
-    // mConcaveMeshShape.getTriangleVerticesNormals(data, verticesNormals[0], verticesNormals[1], verticesNormals[2]);
-
-    // Call the callback to test narrow-phase collision with this triangle
-    mTriangleTestCallback.testTriangle(trianglePoints, verticesNormals, mConcaveMeshShape.computeTriangleShapeId(data));
+    // // Call the callback to test narrow-phase collision with this triangle
+    // // mTriangleTestCallback.testTriangle(trianglePoints, verticesNormals, mConcaveMeshShape.computeTriangleShapeId(data));
 }
 
 // Compute the shape Id for a given triangle of the mesh
-RP3D_FORCE_INLINE uint32 ConcaveMeshShape::computeTriangleShapeId(uint32 triangleIndex) const {
+// RP3D_FORCE_INLINE uint32 ConcaveMeshShape::computeTriangleShapeId(uint32 triangleIndex) const {
 
-    RP3D_PROFILE("ConcaveMeshShape::computeTriangleShapeId()", mProfiler);
+//     RP3D_PROFILE("ConcaveMeshShape::computeTriangleShapeId()", mProfiler);
 
-    return getNbTriangles() + triangleIndex;
-}
+//     return getNbTriangles() + triangleIndex;
+// }
 
 }
 #endif

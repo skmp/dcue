@@ -555,10 +555,10 @@ void PhysicsCommon::deleteHeightFieldShape(HeightFieldShape* heightFieldShape) {
  * @param scaling An optional scaling factor to scale the triangle mesh
  * @return A pointer to the created concave mesh shape
  */
-ConcaveMeshShape* PhysicsCommon::createConcaveMeshShape(TriangleMesh* triangleMesh, const Vector3& scaling) {
+ConcaveMeshShape* PhysicsCommon::createConcaveMeshShape(float* vertices, bvh_t* bvh) {
 
-    ConcaveMeshShape* shape = new (mMemoryManager.allocate(MemoryManager::AllocationType::Pool, sizeof(ConcaveMeshShape))) ConcaveMeshShape(triangleMesh,
-                                                                                                                                            mMemoryManager.getHeapAllocator(), mTriangleShapeHalfEdgeStructure, scaling);
+    ConcaveMeshShape* shape = new (mMemoryManager.allocate(MemoryManager::AllocationType::Pool, sizeof(ConcaveMeshShape))) ConcaveMeshShape(vertices, bvh,
+                                                                                                                                            mMemoryManager.getHeapAllocator(), mTriangleShapeHalfEdgeStructure);
 
     mConcaveMeshShapes.add(shape);
 

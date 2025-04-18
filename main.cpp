@@ -3662,32 +3662,11 @@ void mesh_collider_t::update(float deltaTime) {
 
 	
 	if (meshShape == nullptr) {
-		if (indexCount == 0 || vertexCount == 0) {
-			return;
-		}
 		if (collider) {
 			rigidBody->removeCollider(collider);
 			physicsCommon.destroyConcaveMeshShape(meshShape);
 		}
-		if (!triangleMesh) {
-			triangleMesh = mesh_collider_triangles[{vertices, indices}];
-			if (triangleMesh == nullptr) {
-				std::vector<reactphysics3d::Message> messages;
-				triangleMesh = physicsCommon.createTriangleMesh(vertices, vertexCount, indices, indexCount/3, messages);
-				if (triangleMesh == nullptr) {
-					// Handle error
-					std::cerr << "Failed to create triangle mesh shape" << std::endl;
-
-					for (const auto& message : messages) {
-						std::cerr << "Message: " << message.text << std::endl;
-					}
-					assert(false && "Failed to create triangle mesh shape");
-				}
-
-				mesh_collider_triangles[{vertices, indices}] = triangleMesh;
-			}
-		}
-		meshShape = physicsCommon.createConcaveMeshShape(triangleMesh);
+		meshShape = physicsCommon.createConcaveMeshShape(vertices, bvh);
 		collider = rigidBody->addCollider(meshShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
 	}

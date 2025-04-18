@@ -60,7 +60,7 @@ enum class TriangleRaycastSide {
  */
 class TriangleShape : public ConvexPolyhedronShape {
 
-    protected:
+    public:
 
         // -------------------- Attribute -------------------- //
 
@@ -95,13 +95,13 @@ class TriangleShape : public ConvexPolyhedronShape {
 
         // -------------------- Methods -------------------- //
 
-        /// Constructor
-        TriangleShape(const Vector3* vertices, uint32 shapeId, HalfEdgeStructure& triangleHalfEdgeStructure, MemoryAllocator& allocator);
-
+        
+ 
         /// Destructor
         virtual ~TriangleShape() override = default;
-
-    public:
+        
+        /// Constructor
+        TriangleShape(const Vector3* vertices, uint32 shapeId, HalfEdgeStructure& triangleHalfEdgeStructure, MemoryAllocator& allocator);
 
         // -------------------- Methods -------------------- //
 

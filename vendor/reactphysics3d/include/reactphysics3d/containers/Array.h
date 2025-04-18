@@ -56,10 +56,10 @@ class Array {
         /// Number of allocated elements in the array
         uint64 mCapacity;
 
+        
+    public:
         /// Memory allocator
         MemoryAllocator& mAllocator;
-
-    public:
 
         /// Class Iterator
         /**

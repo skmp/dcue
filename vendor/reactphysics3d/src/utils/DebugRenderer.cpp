@@ -356,18 +356,18 @@ void DebugRenderer::drawConcaveMeshShape(const Transform& transform, const Conca
 
     if (drawShape) {
 
-        // For each triangle of the mesh
-        for (uint32 t = 0; t < concaveMeshShape->getNbTriangles(); t++) {
+        // // For each triangle of the mesh
+        // for (uint32 t = 0; t < concaveMeshShape->getNbTriangles(); t++) {
 
-            Vector3 v1, v2, v3;
-            concaveMeshShape->getTriangleVertices(t, v1, v2, v3);
+        //     Vector3 v1, v2, v3;
+        //     concaveMeshShape->getTriangleVertices(t, v1, v2, v3);
 
-            v1 = transform * v1;
-            v2 = transform * v2;
-            v3 = transform * v3;
+        //     v1 = transform * v1;
+        //     v2 = transform * v2;
+        //     v3 = transform * v3;
 
-            mTriangles.add(DebugTriangle(v1, v2, v3, colorShape));
-        }
+        //     mTriangles.add(DebugTriangle(v1, v2, v3, colorShape));
+        // }
     }
 
     if (drawNormal) {
