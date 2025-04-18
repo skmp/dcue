@@ -1548,7 +1548,14 @@ public class DreamExporter : MonoBehaviour
         sb.AppendLine("#include \"dcue/types-native.h\"");
         sb.AppendLine("using namespace native;");
         sb.AppendLine("");
-        
+
+        sb.AppendLine("size_t roots[] = { ");
+        foreach (var rootGameObject in ds.gameObjects.Where( gameObject => gameObject.transform.parent == null)) {
+            sb.Append($"{ds.gameObjectIndex[rootGameObject]}, ");
+        }
+        sb.Append("SIZE_MAX, ");
+        sb.AppendLine("};");
+
         sb.AppendLine("static size_t parents[] = { ");
         for (int gameObjectNum = 0; gameObjectNum < ds.gameObjects.Count; gameObjectNum++)
         {

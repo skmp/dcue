@@ -110,6 +110,10 @@ namespace native {
         size_t* children;
         component_t* components;
         unsigned ltw_stamp;
+        Sphere compoundSphere;
+        Sphere meshSphere;
+        float maxWorldScale;
+        bool compoundVisible;
 
         mesh_t* mesh;
         material_t** materials;

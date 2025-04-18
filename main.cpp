@@ -368,7 +368,7 @@ bool loadScene(const char* scene) {
             auto materials_group = new material_t*[submesh_count];
             material_groups.push_back(materials_group);
             go->materials = materials_group;
-            for (int materialNum = 0; materialNum < submesh_count; materialNum++) {
+            for (uint32_t materialNum = 0; materialNum < submesh_count; materialNum++) {
                 in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp));
                 if (tmp != UINT32_MAX) {
                     assert(tmp < materials.size());
@@ -1868,20 +1868,14 @@ struct alignas(8) UniformObject
 
 float GetMaxScale(const r_matrix_t& mat) {
     // Compute the scale factors for each axis
-    float scaleRight = std::sqrt(mat.right.x * mat.right.x +
-                                 mat.right.y * mat.right.y +
-                                 mat.right.z * mat.right.z);
+    float scaleRight = mat.right.x * mat.right.x + mat.right.y * mat.right.y + mat.right.z * mat.right.z;
 
-    float scaleUp = std::sqrt(mat.up.x * mat.up.x +
-                              mat.up.y * mat.up.y +
-                              mat.up.z * mat.up.z);
+    float scaleUp = mat.up.x * mat.up.x + mat.up.y * mat.up.y + mat.up.z * mat.up.z;
 
-    float scaleAt = std::sqrt(mat.at.x * mat.at.x +
-                              mat.at.y * mat.at.y +
-                              mat.at.z * mat.at.z);
+    float scaleAt = mat.at.x * mat.at.x + mat.at.y * mat.at.y + mat.at.z * mat.at.z;
 
     // Return the maximum scale factor
-    return std::max({scaleRight, scaleUp, scaleAt});
+    return std::sqrt(std::max({scaleRight, scaleUp, scaleAt}));
 }
 
 #if defined(DEBUG_LOOKAT)
@@ -1900,13 +1894,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
     }
     bool global_needsNoClip = false;
 
-	mat_load((matrix_t*)&go->ltw);
-	Sphere sphere = go->mesh->bounding_sphere;
-	float w;
-	mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
-    float maxScaleFactor = GetMaxScale(go->ltw);
-    sphere.radius *= maxScaleFactor;
-    auto global_visible = cam->frustumTestSphereNear(&sphere);
+    auto global_visible = cam->frustumTestSphereNear(&go->meshSphere);
     if (global_visible == camera_t::SPHEREOUTSIDE) {
         // printf("Outside frustum cull (%f, %f, %f) %f\n", sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius);
         return;
@@ -2011,7 +1999,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 	skip_test:
 	
 
-    auto cntDiffuse = 1;
+    unsigned cntDiffuse = 1;
     r_matrix_t invLtw;
     invertGeneral(&invLtw, &go->ltw);
 
@@ -2033,7 +2021,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 
     const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
 
-    for (int submesh_num = 0; submesh_num < go->submesh_count; submesh_num++) {
+    for (size_t submesh_num = 0; submesh_num < go->submesh_count; submesh_num++) {
 
         pvr_poly_hdr_t hdr;
         bool textured = go->materials[submesh_num]->texture != nullptr;
@@ -2115,7 +2103,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 
         auto meshletInfoBytes = &go->mesh->data[meshInfo[submesh_num].meshletOffset];
         
-        for (unsigned meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
+        for (int16_t meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
             auto meshlet = (const MeshletInfo*)meshletInfoBytes;
             meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
 
@@ -2130,7 +2118,8 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 mat_load((matrix_t*)&go->ltw);
                 float w;
                 mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
-                sphere.radius *= maxScaleFactor;
+				(void)w;
+                sphere.radius *= go->maxWorldScale;
                 auto local_frustumTestResult = cam->frustumTestSphereNear(&sphere);
                 if ( local_frustumTestResult == camera_t::SPHEREOUTSIDE) {
                     // printf("Outside local frustum cull\n");
@@ -2358,7 +2347,7 @@ void renderQuads(camera_t* cam, game_object_t* go) {
 		int16_t* quadIndex = (int16_t*)(go->mesh->quadData + quadOffset);
 		uint8_t* transVtx = OCR_SPACE;
 		int16_t cIndex;
-		pvr_vertex32_ut vtx[4];
+
 		for (size_t quadIdx = 0; quadIdx < quadCount*4; quadIdx+=4) {
 			// submit quad
 			
@@ -2785,7 +2774,6 @@ void animator_t::update(float deltaTime) {
         auto& boundAnim = bound_animations[i];
         for (size_t j = 0; j < boundAnim.animation->num_tracks; ++j) {
             auto& track = boundAnim.animation->tracks[j];
-            auto& binding = boundAnim.bindings[j];
             auto& currentFrame = boundAnim.currentFrames[j];
             if (currentFrame >= track.num_keys - 1) {
                 continue;
@@ -3847,6 +3835,7 @@ void InitializeFlowMachines();
 void positionUpdate() {
 	for (auto go: gameObjects) {
 		if (!go->isActive()) {
+			go->meshSphere.radius = 0;
 			continue;
 		}
 
@@ -3891,16 +3880,26 @@ void positionUpdate() {
 
 		if (go->parent) {
 			mat_load((matrix_t*)&go->parent->ltw);
+			mat_apply((matrix_t*)&pos_mtx);
 		} else {
-			mat_load((matrix_t*)&identity_mtx);
+			mat_load((matrix_t*)&pos_mtx);
 		}
 
-		mat_apply((matrix_t*)&pos_mtx);
 		mat_apply((matrix_t*)&rot_mtx_y);
 		mat_apply((matrix_t*)&rot_mtx_x);
 		mat_apply((matrix_t*)&rot_mtx_z);
 		mat_apply((matrix_t*)&scale_mtx);
 		mat_store((matrix_t*)&go->ltw);
+		go->maxWorldScale = GetMaxScale(go->ltw);
+		if (go->mesh && go->mesh_enabled) {
+			Sphere &sphere = go->mesh->bounding_sphere;
+			float w;
+			mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, go->meshSphere.center.x, go->meshSphere.center.y, go->meshSphere.center.z, w);
+			(void)w;
+			go->meshSphere.radius = sphere.radius * go->maxWorldScale;
+		} else {
+			go->meshSphere.radius = 0;
+		}
 	}
 }
 
@@ -3935,6 +3934,68 @@ bool drawphys;
 #else
 constexpr bool drawphys = false;
 #endif
+
+inline Sphere mergeSpheres(const Sphere* A, const Sphere* B) {
+    // --- 1) ignore any degenerate (zero‑radius) sphere ---
+    if (A->radius == 0.0f) return *B;
+    if (B->radius == 0.0f) return *A;
+
+    // --- 2) now both A and B have radius > 0, do the normal merge ---
+    V3d d    = sub(B->center,   A->center);
+    float dist = length(d);
+
+    // one already contains the other?
+    if (A->radius >= dist + B->radius) return *A;
+    if (B->radius >= dist + A->radius) return *B;
+
+    // otherwise build the minimal enclosing sphere
+    float Rm = (dist + A->radius + B->radius) * 0.5f;
+    float K  = (Rm - A->radius) / dist;
+    // new center = A->center + K * (B->center - A->center)
+    V3d  Cm = add(A->center, scale(d, K));
+
+    return Sphere{ Cm, Rm };
+}
+
+void mergeChildSpheresAndFrustum(camera_t* cam, game_object_t* go) {
+	if (!go->isActive()) {
+		go->compoundSphere.radius = 0;
+		go->compoundVisible = false;
+		return;
+	}
+
+	go->compoundSphere = go->meshSphere;
+	auto childNum = go->children;
+	while(*childNum != SIZE_MAX) {
+		auto child = gameObjects[*childNum++];
+		mergeChildSpheresAndFrustum(cam, child);
+		go->compoundSphere = mergeSpheres(&go->compoundSphere, &child->compoundSphere);
+	}
+
+	go->compoundVisible = cam->frustumTestSphere(&go->compoundSphere) != camera_t::SPHEREOUTSIDE;
+}
+
+template<int mode>
+void renderSelfAndChildren(camera_t* cam, game_object_t* go) {
+	if (!go->compoundVisible) return;
+
+	if (go->mesh_enabled && go->mesh && go->materials) {
+		if (mode == 0 && go->materials[0]->color.alpha == 1) {
+			renderQuads(cam, go);
+		}
+		if (mode == 1 && go->materials[0]->color.alpha == 1) {
+			renderMesh<PVR_LIST_OP_POLY>(cam, go);
+		}
+		if (mode == 2 && go->materials[0]->color.alpha != 1) {
+			renderMesh<PVR_LIST_TR_POLY>(cam, go);
+		}
+	}
+	auto childNum = go->children;
+	while(*childNum != SIZE_MAX) {
+		auto child = gameObjects[*childNum++];
+		renderSelfAndChildren<mode>(cam, child);
+	}
+}
 
 int main(int argc, const char** argv) {
 
@@ -4147,37 +4208,18 @@ int main(int argc, const char** argv) {
 
         currentCamera->beforeRender(4.0f / 3.0f);
 
-        // render frame
-        pvr_set_zclip(0.0f);
-        pvr_set_bg_color(0.5f, 0.5f, 0.5f);
-		pvr_wait_ready();
+		auto rootNum = roots;
+		do {
+			mergeChildSpheresAndFrustum(currentCamera, gameObjects[*rootNum++]);
+		} while(*rootNum != SIZE_MAX);
 
-        enter_oix();
-
-        pvr_scene_begin();
-        pvr_dr_init(&drState);
-        pvr_list_begin(PVR_LIST_OP_POLY);
-
+		// render frame
 		memset(zBuffer, 0, sizeof(zBuffer));
-		#if defined(DC_SIM)
-		total_idx = 0;
-		#endif
-
-		for (auto& go: gameObjects) {
-            if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
-				renderQuads(currentCamera, go);
-            }
-        }
-
-        for (auto& go: gameObjects) {
-            if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha == 1) {
-                if (!drawphys) renderMesh<PVR_LIST_OP_POLY>(currentCamera, go);
-            }
-        }
 		
-		#if defined(DC_SIM)
-		std::cout << total_idx << std::endl;
-		#endif
+		rootNum = roots;
+		do {
+			renderSelfAndChildren<0>(currentCamera, gameObjects[*rootNum++]);
+		} while(*rootNum != SIZE_MAX);
 
 		#if defined(DC_SIM)
 		uint8_t pixBuffer[32][32];
@@ -4191,16 +4233,41 @@ int main(int argc, const char** argv) {
 		}
 		stbi_write_bmp("/home/skmp/projects/dcue/build/zbuffer.bmp",32,32,1,pixBuffer);
 		#endif
+
+        pvr_set_zclip(0.0f);
+        pvr_set_bg_color(0.5f, 0.5f, 0.5f);
+		pvr_wait_ready();
+		
+		#if defined(DC_SIM)
+		total_idx = 0;
+		#endif
+
+        enter_oix();
+
+        pvr_scene_begin();
+        pvr_dr_init(&drState);
+        pvr_list_begin(PVR_LIST_OP_POLY);
+
+		
+		rootNum = roots;
+		do {
+			renderSelfAndChildren<1>(currentCamera, gameObjects[*rootNum++]);
+		} while(*rootNum != SIZE_MAX);
+
+
 		
         pvr_list_finish();
-
+		
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_TR_POLY);
-        for (auto& go: gameObjects) {
-			if (go->isActive() && go->mesh_enabled && go->mesh && go->materials && go->materials[0]->color.alpha != 1) {
-				if (!drawphys) renderMesh<PVR_LIST_TR_POLY>(currentCamera, go);
-            }
-        }
+		rootNum = roots;
+		do {
+			renderSelfAndChildren<2>(currentCamera, gameObjects[*rootNum++]);
+		} while(*rootNum != SIZE_MAX);
+		
+		#if defined(DC_SIM)
+		std::cout << total_idx << std::endl;
+		#endif
 
 		// drawTextCentered(&fonts_19, 24, 320, 240, "Hello M World", 1, 1, 0.1, 0.1);
 		// drawTextCentered(&fonts_0, 11, 320, 240 + 100, "Hello M World", 1, 1, 0.1, 0.1);

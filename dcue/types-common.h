@@ -52,6 +52,7 @@ inline bool equal(const V3d &v1, const V3d &v2) { return v1.x == v2.x && v1.y ==
 inline V3d neg(const V3d &a) { return makeV3d(-a.x, -a.y, -a.z); }
 inline V3d add(const V3d &a, const V3d &b) { return makeV3d(a.x+b.x, a.y+b.y, a.z+b.z); }
 inline V3d sub(const V3d &a, const V3d &b) { return makeV3d(a.x-b.x, a.y-b.y, a.z-b.z); }
+inline V3d mul(const V3d &a, const V3d &b) { return makeV3d(a.x*b.x, a.y*b.y, a.z*b.z); }
 inline V3d scale(const V3d &a, float r) { return makeV3d(a.x*r, a.y*r, a.z*r); }
 inline float length(const V3d &v) { return sqrtf(v.x*v.x + v.y*v.y + v.z*v.z); }
 inline V3d normalize(const V3d &v) { return scale(v, 1.0f/length(v)); }
