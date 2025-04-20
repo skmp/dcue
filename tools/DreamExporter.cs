@@ -1,3 +1,5 @@
+// THIS IS OUT OF DATE
+#if GOT_FROM_PLASTIC_UPDATE
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -2860,3 +2862,4 @@ public class DreamExporter : MonoBehaviour
         }
     }
 }
+#endif

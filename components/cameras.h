@@ -110,7 +110,8 @@ struct camera_t {
 
         // View Matrix
         r_matrix_t inv;
-        invertGeneral(&inv, &gameObject->ltw);
+        float det;
+        invertGeneral(&inv, &det, &gameObject->ltw);
         // Since we're looking into positive Z,
         // flip X to ge a left handed view space.
         view[0]  = -inv.right.x;

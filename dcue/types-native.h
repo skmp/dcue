@@ -64,7 +64,7 @@ namespace native {
     };
 
     // TODO: proper place
-    inline void invertGeneral(r_matrix_t *dst, const r_matrix_t *src)
+    inline float invertGeneral(r_matrix_t *dst, float* det_out, const r_matrix_t *src)
     {
         float det, invdet;
         // calculate a few cofactors
@@ -73,6 +73,7 @@ namespace native {
         dst->right.z = src->right.y*src->up.z - src->right.z*src->up.y;
         // get the determinant from that
         det = src->up.x * dst->right.y + src->at.x * dst->right.z + dst->right.x * src->right.x;
+        *det_out = det;
         invdet = 1.0;
         if(det != 0.0f)
             invdet = 1.0f/det;

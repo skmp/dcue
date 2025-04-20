@@ -2001,7 +2001,10 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 
     unsigned cntDiffuse = 1;
     r_matrix_t invLtw;
-    invertGeneral(&invLtw, &go->ltw);
+	float det;
+    invertGeneral(&invLtw, &det, &go->ltw);
+
+	unsigned culling = det > 0 ? PVR_CULLING_CCW : PVR_CULLING_CW;
 
     UniformObject uniformObject;
     mat_load((matrix_t*)&invLtw);
@@ -2050,7 +2053,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
                 PVR_DEPTHCMP_GEQUAL,
                 PVR_DEPTHWRITE_ENABLE,
-                PVR_CULLING_SMALL,
+                culling,
                 PVR_FOG_DISABLE
             );
         } else {
@@ -2063,7 +2066,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 list != PVR_LIST_OP_POLY ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ZERO,
                 PVR_DEPTHCMP_GEQUAL,
                 PVR_DEPTHWRITE_ENABLE,
-                PVR_CULLING_SMALL,
+                culling,
                 PVR_FOG_DISABLE
             );
         }
@@ -2499,6 +2502,11 @@ void renderQuads(camera_t* cam, game_object_t* go) {
 				{
 					float x_ps = fx;
 					float y_ps = fy;
+
+					// float Xhs12 = C1 + DX12 * y_ps - DY12 * x_ps;
+					// float Xhs23 = C2 + DX23 * y_ps - DY23 * x_ps;
+					// float Xhs31 = C3 + DX31 * y_ps - DY31 * x_ps;
+					// float Xhs41 = C4 + DX41 * y_ps - DY41 * x_ps;
 
 					float Xhs12;
 					float Xhs23;
