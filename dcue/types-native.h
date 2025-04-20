@@ -64,7 +64,7 @@ namespace native {
     };
 
     // TODO: proper place
-    inline float invertGeneral(r_matrix_t *dst, float* det_out, const r_matrix_t *src)
+    inline void invertGeneral(r_matrix_t *dst, float* det_out, const r_matrix_t *src)
     {
         float det, invdet;
         // calculate a few cofactors
