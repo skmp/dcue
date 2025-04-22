@@ -3583,16 +3583,18 @@ void interactable_message_t::update(game_object_t* mainCamera) {
 			// {
 			// 	ShowLookAtText(temp.LookAtMessage.Equals("") ? DefaultLookAtText : temp.LookAtMessage, temp);
 			// }
-			
+			currentLookAtInteractable = temp;
 			lookAtMessage = temp->lookAtMessage ? temp->lookAtMessage : defaultLookAtText;
 		} else {
 			// TODO
 			// HideLookAtText();
+			currentLookAtInteractable = nullptr;
 			lookAtMessage = nullptr;
 		}
-	} else {
+	} else if (currentLookAtInteractable != nullptr) {
 		// TODO
 		// HideLookAtText();
+		currentLookAtInteractable = nullptr;
 		lookAtMessage = nullptr;
 	}
 }
@@ -3998,7 +4000,10 @@ void drawTextLeftBottom(font_t* font, float em, float x, float y, const char* te
 
 std::list<Task> coroutines;
 void queueCoroutine(Task&& coroutine) {
-	coroutines.push_back(std::move(coroutine));
+	coroutine.next();
+	if (!coroutine.done()) {
+		coroutines.push_back(std::move(coroutine));
+	}
 }
 
 // TODO: move to some header
