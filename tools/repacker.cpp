@@ -623,7 +623,7 @@ void loadDreamScene(const char *scene) {
     // Read and verify header (8 bytes)
     char header[8];
     in.read(header, 8);
-    if (std::string(header, 8) != "DCUE0002") {
+    if (std::string(header, 8) != "DCUE0003") {
         printf("Invalid file header\n");
         exit(1);
     }
@@ -711,8 +711,10 @@ void loadDreamScene(const char *scene) {
 
 		int subMeshCount = 0;
     	in.read(reinterpret_cast<char*>(&subMeshCount), sizeof(int));
-		submesh_t* submeshes = new submesh_t[subMeshCount];
-		for (int subMeshNum = 0; subMeshNum < subMeshCount; subMeshNum++) {
+		int logicalSubMeshCount = 0;
+    	in.read(reinterpret_cast<char*>(&logicalSubMeshCount), sizeof(int));
+		submesh_t* submeshes = new submesh_t[subMeshCount + logicalSubMeshCount];
+		for (int subMeshNum = 0; subMeshNum < subMeshCount + logicalSubMeshCount; subMeshNum++) {
 			// Indices
 			int indexCount = 0;
 			in.read(reinterpret_cast<char*>(&indexCount), sizeof(int));
@@ -722,7 +724,7 @@ void loadDreamScene(const char *scene) {
 			submeshes[subMeshNum].index_count = indexCount;
 			submeshes[subMeshNum].indices = indices;
 		}
-        mesh_t* mesh = new mesh_t(subMeshCount, submeshes, vertexCount, vertices, uvs, colors, normals);
+        mesh_t* mesh = new mesh_t(subMeshCount, logicalSubMeshCount, submeshes, vertexCount, vertices, uvs, colors, normals);
         meshes.push_back(mesh);
     }
 
@@ -897,7 +899,7 @@ void loadDreamScene(const char *scene) {
 			submeshes[0].index_count = indexCount;
 			submeshes[0].indices = indices;
 
-			mesh = new mesh_t(1, submeshes, vertexCount, vertices, uvs, nullptr, normals_ptr);
+			mesh = new mesh_t(1, 0, submeshes, vertexCount, vertices, uvs, nullptr, normals_ptr);
 			meshes.push_back(mesh);
 
 			materials_lst = new material_t*[1];
@@ -1159,7 +1161,7 @@ struct compressed_mesh_t {
 compressed_mesh_t process_mesh(mesh_t *mesh) {
 	using namespace triangle_stripper;
 	
-	int32 n = mesh->submesh_count;
+	int32 n = mesh->submesh_count + mesh->logical_submesh_count;
 	std::vector<primitive_vector> pvecs(n);
 	std::vector<std::vector<meshlet>> meshMeshlets(n);
 
@@ -1657,7 +1659,7 @@ int main(int argc, const char** argv) {
         hash_sha256 hash;
         hash.sha256_init();
         hash.sha256_update((uint8_t*)mesh->vertices, mesh->vertex_count * 3 * sizeof(float));
-		for (int submeshNum = 0; submeshNum < mesh->submesh_count; submeshNum++) {
+		for (int submeshNum = 0; submeshNum < mesh->submesh_count + mesh->logical_submesh_count; submeshNum++) {
         	hash.sha256_update((uint8_t*)mesh->submeshes[submeshNum].indices, mesh->submeshes[submeshNum].index_count * sizeof(uint16_t));
 		}
         if (mesh->col) {

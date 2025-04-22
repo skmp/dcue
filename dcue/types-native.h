@@ -119,6 +119,7 @@ namespace native {
         mesh_t* mesh;
         material_t** materials;
         size_t submesh_count;
+        int logical_submesh = -1;
         /*game_object_inactive_t*/ unsigned inactiveFlags;
         bool mesh_enabled;
 

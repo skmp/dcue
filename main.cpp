@@ -2107,9 +2107,14 @@ void renderMesh(camera_t* cam, game_object_t* go) {
             lightDiffuseColors[i].blue = material.blue * uniformObject.col[i].blue * diffuse;
         }
 
-        auto meshletInfoBytes = &go->mesh->data[meshInfo[submesh_num].meshletOffset];
+		int effectiveSubmeshNum = submesh_num;
+		if (submesh_num == 0 && go->logical_submesh != -1) {
+			effectiveSubmeshNum = go->submesh_count + go->logical_submesh;
+		}
+
+        auto meshletInfoBytes = &go->mesh->data[meshInfo[effectiveSubmeshNum].meshletOffset];
         
-        for (int16_t meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
+        for (int16_t meshletNum = 0; meshletNum < meshInfo[effectiveSubmeshNum].meshletCount; meshletNum++) {
             auto meshlet = (const MeshletInfo*)meshletInfoBytes;
             meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
 
@@ -3690,7 +3695,8 @@ void teleporter_t::teleport() {
 
 void tv_programming_t::update(float deltaTime) {
 	totalTime += deltaTime;
-	gameObject->materials[0] = ::materials[materials[(size_t)(totalTime / materialRate) % materialCount]];
+	gameObject->logical_submesh = int((size_t)(totalTime / materialRate) % materialCount);
+	gameObject->materials[0] = ::materials[materials[gameObject->logical_submesh]];
 }
 
 void box_collider_t::update(float deltaTime) {

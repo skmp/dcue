@@ -47,10 +47,12 @@ namespace import {
         size_t vertex_count;
         submesh_t* submeshes;
         size_t submesh_count;
+        size_t logical_submesh_count;
 
-        mesh_t(size_t submesh_count, submesh_t* submeshes, size_t vertex_count, float* vertices, float* uv, uint8_t* col, float* normals)
+        mesh_t(size_t submesh_count, size_t logical_submesh_count, submesh_t* submeshes, size_t vertex_count, float* vertices, float* uv, uint8_t* col, float* normals)
         {
             this->submesh_count = submesh_count;
+            this->logical_submesh_count = logical_submesh_count;
             this->submeshes = submeshes;
             this->vertex_count = vertex_count;
             this->vertices = vertices;
