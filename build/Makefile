@@ -14,7 +14,7 @@ DATA_DIR=repack-data/tlj
 # include common.mk
 include reactphysics3d.mk
 OBJS = \
-	../main.o ../pavo/pavo.o ../vendor/gldc/alloc.o ../first_level/hierarchy.o ../first_level/components.o ../first_level/animations.o ../first_level/cameras.o ../first_level/scripts.o ../first_level/physics.o ../first_level/fonts.o ../first_level/flowmachines.o \
+	../main.o ../pavo/pavo.o ../vendor/gldc/alloc.o ../first_level/hierarchy.o ../first_level/components.o ../first_level/animations.o ../first_level/cameras.o ../first_level/audio_sources.o ../first_level/audio_clips.o ../first_level/scripts.o ../first_level/physics.o ../first_level/fonts.o ../first_level/flowmachines.o \
 	\
 	$(RP3D_OBJECTS)
 
@@ -126,11 +126,12 @@ cdi: $(PROJECT_NAME).cdi
 repack-data/fonts.repacked: $(shell ls fonts/font_*.png) | pvrtex
 	@mkdir -p repack-data/tlj
 	@mkdir -p repack-data/fonts
+	@mkdir -p repack-data/tlj/fonts
 	@for i in $(shell ls fonts/font_*.png); do \
 		cp $${i} repack-data/fonts/; \
 		mogrify -resize '256x256>' repack-data/fonts/$$(basename $${i}); \
 		convert repack-data/fonts/$$(basename $${i}) -channel RGB -negate +channel repack-data/fonts/$$(basename $${i}); \
-		../vendor/pvrtex/pvrtex -i repack-data/fonts/$$(basename $${i}) -o repack-data/tlj/$$(basename $${i%.png}.pvr) -c small -d; \
+		../vendor/pvrtex/pvrtex -i repack-data/fonts/$$(basename $${i}) -o repack-data/tlj/fonts/$$(basename $${i%.png}.pvr) -c small -d; \
 	done
 	@echo && echo && echo "*** Repacked Fonts ***" && echo && echo
 	@touch $@

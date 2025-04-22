@@ -44,7 +44,6 @@ struct box_collider_t {
     reactphysics3d::RigidBody* rigidBody;
     reactphysics3d::Collider* collider;
     reactphysics3d::BoxShape* boxShape;
-    V3d lastScale;
 
     void update(float deltaTime);
 };
@@ -60,7 +59,7 @@ struct sphere_collider_t {
     reactphysics3d::RigidBody* rigidBody;
     reactphysics3d::Collider* collider;
     reactphysics3d::SphereShape* sphereShape;
-    V3d lastScale;
+
     void update(float deltaTime);
 };
 
@@ -76,7 +75,7 @@ struct capsule_collider_t {
     reactphysics3d::RigidBody* rigidBody;
     reactphysics3d::Collider* collider;
     reactphysics3d::CapsuleShape* capsuleShape;
-    V3d lastScale;
+
     void update(float deltaTime);
 };
 

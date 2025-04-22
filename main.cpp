@@ -3185,7 +3185,7 @@ void player_movement_t::update(float deltaTime) {
 	
 		physicsWorld->raycast(ray, &moveCheck);
 	
-		if (moveCheck.distance > 7) {
+		if (moveCheck.distance > 5) {
 			movement *= speed * deltaTime;
 	
 		
@@ -3194,21 +3194,28 @@ void player_movement_t::update(float deltaTime) {
 			gameObject->position.x += movementX;
 			gameObject->position.z += movementZ;
 		}
-	}
 
+		static V3d lastPos = {-1000, -1000,-1000};
+		// TODO: move to a better place
+		if (lastPos.x != playa->ltw.pos.x || lastPos.y != playa->ltw.pos.y || lastPos.z != playa->ltw.pos.z) {
+			lastPos = playa->ltw.pos;
+			reactphysics3d::Vector3 downAt = { 0, -1, 0 };
+			GroundRaycastCallback<10.f> groundCheck1, groundCheck2;
+			
 
-	// TODO: move to a better place
-	{
-		GroundRaycastCallback<10.f> groundCheck;
+			reactphysics3d::Vector3 playaPos1 = {playa->ltw.pos.x+0.2f, playa->ltw.pos.y, playa->ltw.pos.z};
+			reactphysics3d::Ray ray1(playaPos1, playaPos1 + downAt*groundCheck1.distance);
+			physicsWorld->raycast(ray1, &groundCheck1);
+
+			reactphysics3d::Vector3 playaPos2 = {playa->ltw.pos.x-0.2f, playa->ltw.pos.y, playa->ltw.pos.z};
+			reactphysics3d::Ray ray2(playaPos2, playaPos2 + downAt*groundCheck2.distance);
+
+			physicsWorld->raycast(ray2, &groundCheck2);
+
+			float minGroundDistance = std::min(groundCheck1.distance, groundCheck2.distance);
 		
-		reactphysics3d::Vector3 playaPos = {playa->ltw.pos.x, playa->ltw.pos.y, playa->ltw.pos.z};
-		reactphysics3d::Vector3 downAt = { 0, -1, 0 };
-
-		reactphysics3d::Ray ray(playaPos, playaPos + downAt*groundCheck.distance);
-
-		physicsWorld->raycast(ray, &groundCheck);
-	
-		playa->position.y -= groundCheck.distance - 0.5f - 3.8f/2; // TODO: the 3.8f should come from the character controller
+			playa->position.y -= minGroundDistance - 0.5f - 3.8f/2; // TODO: the 3.8f should come from the character controller
+		}
 	}
 }
 
@@ -3481,42 +3488,6 @@ void teleporter_t::teleport() {
 	}
 }
 
-V3d ComputeAxisAlignedScaleSigned(const r_matrix_t* mtx) {
-	// 1) grab the three **world‑space basis** columns
-	V3d Bx = mtx->right;
-	V3d By = mtx->up;
-	V3d Bz = mtx->at;
-
-	// 2) lengths = |sx|,|sy|,|sz|
-	float sx = length(Bx);
-	float sy = length(By);
-	float sz = length(Bz);
-
-	// guard
-	if (sx == 0 || sy == 0 || sz == 0)
-		return {0, 0, 0};
-
-	// 3) normalized axes
-	V3d x = {Bx.x / sx, Bx.y / sx, Bx.z / sx};
-	V3d y = {By.x / sy, By.y / sy, By.z / sy};
-	V3d z = {Bz.x / sz, Bz.y / sz, Bz.z / sz};
-
-	// 4) triple‐product sign tests
-	float signX = (dot(cross(y, z), x) >= 0.f) ? +1.f : -1.f;
-	float signY = (dot(cross(z, x), y) >= 0.f) ? +1.f : -1.f;
-	float signZ = (dot(cross(x, y), z) >= 0.f) ? +1.f : -1.f;
-
-	return {sx * signX, sy * signY, sz * signZ};
-}
-
-V3d ComputeAxisAlignedScale(const r_matrix_t* mtx) {
-    V3d scale;
-	scale.x = sqrt(mtx->right.x * mtx->right.x + mtx->right.y * mtx->right.y + mtx->right.z * mtx->right.z);
-	scale.y = sqrt(mtx->up.x    * mtx->up.x    + mtx->up.y    * mtx->up.y    + mtx->up.z    * mtx->up.z);
-	scale.z = sqrt(mtx->at.x    * mtx->at.x    + mtx->at.y    * mtx->at.y    + mtx->at.z    * mtx->at.z);
-    return scale;
-}
-
 void box_collider_t::update(float deltaTime) {
 	if (!rigidBody) {
 		reactphysics3d::Transform t;
@@ -3543,17 +3514,14 @@ void box_collider_t::update(float deltaTime) {
 	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 
-	V3d scale = {1, 1, 1};
-	//V3d scale = { std::abs(gameObject->scale.x), std::abs(gameObject->scale.y), std::abs(gameObject->scale.z)};
-	if (lastScale != scale || boxShape == nullptr) {
+	if (boxShape == nullptr) {
 		if (collider) {
 			rigidBody->removeCollider(collider);
 			physicsCommon.destroyBoxShape(boxShape);
 		}
-		boxShape = physicsCommon.createBoxShape(reactphysics3d::Vector3(scale.x * halfSize.x, scale.y * halfSize.y, scale.z * halfSize.z));
+		boxShape = physicsCommon.createBoxShape(reactphysics3d::Vector3(halfSize.x, halfSize.y, halfSize.z));
 		collider = rigidBody->addCollider(boxShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
-		lastScale = scale;
 	}
 }
 
@@ -3583,17 +3551,14 @@ void sphere_collider_t::update(float deltaTime) {
 	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 
-	V3d scale3 = {1, 1, 1};
-	float scale = std::max(scale3.x, std::max(scale3.y, scale3.z));
-	if (lastScale != scale3 || sphereShape == nullptr) {
+	if (sphereShape == nullptr) {
 		if (collider) {
 			rigidBody->removeCollider(collider);
 			physicsCommon.destroySphereShape(sphereShape);
 		}
-		sphereShape = physicsCommon.createSphereShape(scale * radius);
+		sphereShape = physicsCommon.createSphereShape(radius);
 		collider = rigidBody->addCollider(sphereShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
-		lastScale = scale3;
 	}
 }
 
@@ -3623,18 +3588,14 @@ void capsule_collider_t::update(float deltaTime) {
 	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
 	
-	V3d scale3 = { 1, 1, 1 };
-	V2d scale = V2d(std::max(scale3.x, scale3.z), scale3.y);
-
-	if (lastScale != scale3 || capsuleShape == nullptr) {
+	if (capsuleShape == nullptr) {
 		if (collider) {
 			rigidBody->removeCollider(collider);
 			physicsCommon.destroyCapsuleShape(capsuleShape);
 		}
-		capsuleShape = physicsCommon.createCapsuleShape(scale.x * radius, scale.y * height);
+		capsuleShape = physicsCommon.createCapsuleShape(radius, height);
 		collider = rigidBody->addCollider(capsuleShape, reactphysics3d::Transform::identity());
 		collider->setUserData(this);
-		lastScale = scale3;
 	}
 }
 

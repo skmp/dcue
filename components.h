@@ -9,6 +9,7 @@ namespace native {
 // components
 struct animator_t;
 struct camera_t;
+struct audio_source_t;
 
 // scripts
 struct proximity_interactable_t;
@@ -53,6 +54,7 @@ enum component_type_t {
     // components
     ct_animator,
     ct_camera,
+    ct_audio_source,
 
     // scripts
     ct_proximity_interactable,
@@ -92,6 +94,7 @@ struct component_t {
         // components
         component_base_t** components;
         animator_t** animators;
+        audio_source_t** audioSources;
 
         // scripts
         camera_t** cameras;
