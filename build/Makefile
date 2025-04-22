@@ -114,6 +114,9 @@ DEPS_REPACKER=$(OBJS_REPACKER:.o=.d)
 repacker.elf: $(OBJS_REPACKER) | pvrtex
 	$(CXX) -g -fno-pic -no-pie -o $@ $(CXXFLAGS) -DDC_REPACKER $(OBJS_REPACKER) -lmeshoptimizer
 
+aud2adpcm: ../vendor/dca3/aud2adpcm.c
+	$(CC) -o $@ -O3 -g $< -I../vendor/minimp3
+
 $(PROJECT_NAME).cdi: $(TARGET)
 	mkdcdisc -e $(TARGET) -o $(PROJECT_NAME).cdi -d $(DATA_DIR)/ $(MKDCDISC_PAD_OPTION) -n $(PROJECT_NAME) -a $(TEAM_NAME) -s $(DISC_SERIAL) -r $(RELEASE_DATE)
 
