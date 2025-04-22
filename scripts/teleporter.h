@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include "components.h"
+#include "dcue/coroutines.h"
 
 namespace native {
     struct game_object_t;
@@ -29,4 +30,6 @@ struct teleporter_t {
 
     void tryTeleport();
     void teleport();
+
+    Task doFade(float fadeInDuration, float fadeOutDuration);
 };

@@ -26,6 +26,8 @@
 #include "components/cameras.h"
 #include "components/physics.h"
 #include "components/fonts.h"
+#include "components/audio_sources.h"
+#include "components/audio_clips.h"
 
 #include "pavo/pavo.h"
 
@@ -272,6 +274,7 @@ void load_pvr(const char *fname, texture_t* texture) {
 
     texture->lw = __builtin_ctz(HDR.nWidth) - 3;
     texture->lh = __builtin_ctz(HDR.nHeight) - 3;
+	fclose(tex);
 }
 
 bool loadScene(const char* scene) {
@@ -1850,7 +1853,7 @@ size_t vertexBufferFree() {
 
 bool vertexOverflown() {
 	return  PVR_GET(PVR_TA_VERTBUF_POS) >= PVR_GET(PVR_TA_VERTBUF_END) ||
-			PVR_GET(PVR_TA_OPB_POS)*4 >= PVR_GET(PVR_TA_OPB_END);
+			(PVR_GET(PVR_TA_OPB_POS)*4 >= PVR_GET(PVR_TA_OPB_END) && PVR_GET(PVR_TA_OPB_POS) != PVR_GET(PVR_TA_OPB_INIT));
 }
 
 constexpr size_t freeVertexTarget_Step_Up = 32 * 1024;
@@ -2763,6 +2766,11 @@ void renderQuads(camera_t* cam, game_object_t* go) {
 extern "C" const char* getExecutableTag() {
 	return "tlj "  ":" ;
 }
+const char* choices_prompt;
+const char** choices_options;
+int choice_chosen = -1;
+int choice_current = 0;
+
 const char* lookAtMessage = nullptr;
 const char* messageSpeaker = nullptr;
 const char* messageText = nullptr;
@@ -2827,6 +2835,68 @@ void animator_t::update(float deltaTime) {
                 case Transform_m_LocalScale_z:
                     target->scale.z = value + t * (nextValue - value);
                     break;
+				case GameObject_IsActive:
+					target->setActive(value == 1);
+					break;
+				case AudioSource_Volume:
+					{
+						auto audioSource = target->getComponent<audio_source_t>();
+						if (audioSource) {
+							audioSource->volume = value + t * (nextValue - value);
+						}
+					}
+					break;
+				case AudioSource_Enabled:
+					{
+						auto audioSource = target->getComponent<audio_source_t>();
+						if (audioSource) {
+							audioSource->setEnabled(value == 1);
+						}
+					}
+					break;
+
+				case Camera_FOV:
+					{
+						auto camera = target->getComponent<camera_t>();
+						if (camera) {
+							camera->fov = value + t * (nextValue - value);
+						}
+					}
+					break;
+
+				case MeshRenderer_Enabled:
+				{
+					target->mesh_enabled = value == 1;
+				}
+				break;
+				case MeshRenderer_material_Color_a:
+				{
+					if (target->mesh) {
+						target->materials[0]->color.alpha =  value + t * (nextValue - value);
+					}
+				}
+				break;
+				case MeshRenderer_material_Color_b:
+				{
+					if (target->mesh) {
+						target->materials[0]->color.blue =  value + t * (nextValue - value);
+					}
+				}
+				break;
+				case MeshRenderer_material_Color_g:
+				{
+					if (target->mesh) {
+						target->materials[0]->color.green =  value + t * (nextValue - value);
+					}
+				}
+				break;
+				case MeshRenderer_material_Color_r:
+				{
+					if (target->mesh) {
+						target->materials[0]->color.red =  value + t * (nextValue - value);
+					}
+				}
+				break;
             }
         }
     }
@@ -2847,8 +2917,55 @@ void native::game_object_t::computeActiveState() {
 	// }
 }
 
+void recusrive_awake(game_object_t* go) {
+	audio_source_t** audioSources = go->getComponents<audio_source_t>();
+	if (audioSources) {
+		do {
+			auto audioSource = *audioSources;
+			if (audioSource->enabled) {
+				audioSource->awake();
+			}
+		} while(*++audioSources);
+	}
+
+	auto childNum = go->children;
+	while(*childNum != SIZE_MAX) {
+		auto child = gameObjects[*childNum++];
+		if (child->isActive()) {
+			recusrive_awake(child);
+		}
+	}
+}
+
+void recusrive_disable(game_object_t* go) {
+	audio_source_t** audioSources = go->getComponents<audio_source_t>();
+	if (audioSources) {
+		do {
+			auto audioSource = *audioSources;
+			audioSource->disable();
+		} while(*++audioSources);
+	}
+
+	auto childNum = go->children;
+	while(*childNum != SIZE_MAX) {
+		auto child = gameObjects[*childNum++];
+		recusrive_disable(child);
+	}
+}
+
 void native::game_object_t::setActive(bool active) {
+	bool wasActive = isActive();
 	inactiveFlags = !active ? goi_inactive : 0;
+
+	bool nowActive = isActive();
+
+	if (!wasActive && nowActive) {
+		recusrive_awake(this);
+	}
+
+	if (wasActive && !nowActive) {
+		recusrive_disable(this);
+	}
 	// if (active && (inactiveFlags & goi_inactive)) {
 	// 	inactiveFlags &= ~goi_inactive;
 	// 	if (!inactiveFlags) {
@@ -2976,7 +3093,8 @@ void timed_activeinactive_t::interact() {
 }
 
 void fadein_t::interact() {
-	// TODO
+	// TODO: actually fade in
+	target->volume = targetVolume;
 }
 
 void show_message_t::interact() {
@@ -3125,6 +3243,11 @@ void cant_move_t::interact() {
 	queueCoroutine(this->delayDeactivate(delay));
 }
 
+void play_sound_t::interact() {
+	source->volume = 1;
+	source->play();
+}
+
 
 // TODO: manage well known objects in the scene better
 game_object_t* playa;
@@ -3137,7 +3260,7 @@ struct GroundRaycastCallback: public reactphysics3d::RaycastCallback {
 	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
 		auto collider = (box_collider_t*)raycastInfo.collider->getUserData();
 		auto distance = raycastInfo.hitFraction * maxDistance;
-		if (collider->gameObject->isActive() && distance > 0.5f /* this is a hack */) {
+		if (collider->gameObject->isActive()) {
 			this->distance = distance;
 			return raycastInfo.hitFraction;
 		} else {
@@ -3148,7 +3271,9 @@ struct GroundRaycastCallback: public reactphysics3d::RaycastCallback {
 
 void player_movement_t::update(float deltaTime) {
 	// TODO: well known objects
-	playa = gameObject;
+	if (playa == nullptr) {
+		playa = gameObject;
+	}
 
 	if (!canMove || !pavo_state_t::getEnv()->canMove) {
 		return;
@@ -3227,7 +3352,7 @@ struct LookAtCheck: public reactphysics3d::RaycastCallback {
 	virtual float notifyRaycastHit(const reactphysics3d::RaycastInfo& raycastInfo) override {
 		auto collider = (box_collider_t*)raycastInfo.collider->getUserData();
 		float distance = raycastInfo.hitFraction * maxDistance;
-		if (collider->gameObject->isActive() && distance > 0.5f /* this is a hack */) {
+		if (collider->gameObject->isActive()) {
 			this->collider = collider;
 			this->distance = distance;
 			return raycastInfo.hitFraction;
@@ -3284,11 +3409,11 @@ void mouse_look_t::update(float deltaTime) {
 			}
 		} else {
 			bool Handled = false;
-			LookAtCheck<100.f> lookAtChecker;
+			LookAtCheck<50.f> lookAtChecker;
 
 			reactphysics3d::Vector3 cameraPos = {gameObject->ltw.pos.x, gameObject->ltw.pos.y, gameObject->ltw.pos.z};
 			reactphysics3d::Vector3 cameraAt = {gameObject->ltw.at.x, gameObject->ltw.at.y, gameObject->ltw.at.z};
-			reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*100);
+			reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*50);
 			
 			// physics is one step behind here
 			physicsWorld->raycast(ray, &lookAtChecker);
@@ -3376,48 +3501,11 @@ void mouse_look_t::update(float deltaTime) {
 						}
 				}
 
-				if (!ii2) {
-					auto temp = lookAtChecker.collider->gameObject->getComponent<interactable_t>();
-					if (temp) {
-						// TODO
-						/*
-						if (messaging.Visible() || dialog.Visible() || password.Visible() || map.Visible())
-						{
-							textGameObject.SetActive(false);
-							lastInVisible = Time.time;
-						}
-						// TODO: This is also a hack
-						else if ((Time.time - lastInVisible) > 0.05f)
-						{
-							textGameObject.SetActive(true);
-						}
-						*/
-
-						if (temp->interactionRadius >= lookAtChecker.distance) {
-							// TODO
-							// if (messaging.busy != (object)temp)
-							// {
-							// 	ShowLookAtText(temp.LookAtMessage.Equals("") ? DefaultLookAtText : temp.LookAtMessage, temp);
-							// }
-							assert(temp->lookAtMessage);
-							// TODO
-							// lookAtMessage = temp->lookAtMessage ? temp->lookAtMessage : temp->defaultLookAtText;
-							lookAtMessage = temp->lookAtMessage;
-						} else {
-							// TODO
-							// HideLookAtText();
-							lookAtMessage = nullptr;
-						}
-					} else {
-						// TODO
-						lookAtMessage = nullptr;
-					}
-				}
 				//  else {
 				// 	// TODO
 				// 	lookAtMessage = nullptr;
 				// }
- 			} else {
+ 			} else { // this is a fix VS C#
 				if (ii2LookAt != nullptr) {
 					ii2LookAt->lookAway();
 					ii2LookAt = nullptr;
@@ -3443,6 +3531,71 @@ void mouse_look_t::update(float deltaTime) {
 	#endif
 }
 
+void interactable_message_t::update(game_object_t* mainCamera) {
+	LookAtCheck<25.f> lookAtChecker;
+
+	reactphysics3d::Vector3 cameraPos = {mainCamera->ltw.pos.x, mainCamera->ltw.pos.y, mainCamera->ltw.pos.z};
+	reactphysics3d::Vector3 cameraAt = {mainCamera->ltw.at.x, mainCamera->ltw.at.y, mainCamera->ltw.at.z};
+	reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*25);
+	
+	// physics is one step behind here
+	physicsWorld->raycast(ray, &lookAtChecker);
+	/*
+	TODO:
+
+	if (messaging.Visible() || dialog.Visible() || password.Visible() || map.Visible())
+	{
+		textGameObject.SetActive(false);
+		lastInVisible = Time.time;
+	}
+	// TODO: This is also a hack
+	else if ((Time.time - lastInVisible) > 0.05f)
+	{
+		textGameObject.SetActive(true);
+	}
+	*/
+
+	/*Interactable temp;
+	if (wasHit && hit.collider.gameObject.TryGetComponent<Interactable>(out temp))
+	{
+		if (temp.InteractionRadious >= hit.distance)
+		{
+			if (messaging.busy != (object)temp)
+			{
+				ShowLookAtText(temp.LookAtMessage.Equals("") ? DefaultLookAtText : temp.LookAtMessage, temp);
+   
+			}
+		}
+		else
+		{
+			HideLookAtText();
+		}
+	}
+	else if (CurrentLookAtInteractable != null)
+	{
+		HideLookAtText();
+	}*/
+	interactable_t* temp;
+	if (lookAtChecker.collider != nullptr && (temp = lookAtChecker.collider->gameObject->getComponent<interactable_t>())) {
+		if (temp->interactionRadius >= lookAtChecker.distance) {
+			// TODO
+			// if (messaging.busy != (object)temp)
+			// {
+			// 	ShowLookAtText(temp.LookAtMessage.Equals("") ? DefaultLookAtText : temp.LookAtMessage, temp);
+			// }
+			
+			lookAtMessage = temp->lookAtMessage ? temp->lookAtMessage : defaultLookAtText;
+		} else {
+			// TODO
+			// HideLookAtText();
+			lookAtMessage = nullptr;
+		}
+	} else {
+		// TODO
+		// HideLookAtText();
+		lookAtMessage = nullptr;
+	}
+}
 
 void teleporter_t::update(float deltaTime) {
 	if (!requiresTrigger) {
@@ -3466,12 +3619,57 @@ void teleporter_t::tryTeleport() {
 
 	if (distance < radius) {
 		if (requiresItem) {
-			// TODO: pavo invetory check
+			if (pavo_state_t::hasItem(requiresItem)) {
+				if (removeAfterUnlock) {
+					pavo_state_t::removeItem(requiresItem);
+				}
+			} else {
+				return;
+			}
 		}
 		// TODO: fluctuate FOV
-		// TODO: Fade
-		teleport();
+		if (fade) {
+			queueCoroutine(this->doFade(fadeInDuraiton, fadeOutDuration));
+		} else {
+			teleport();
+		}
 	}
+}
+
+RGBAf overlayImage;
+
+Task teleporter_t::doFade(float fadeInDuration, float fadeOutDuration) {
+	float currentTime = 0;
+	float start = 0;
+
+	// DisableMovement();
+	player_movement_t::canMove = false;
+
+	overlayImage.red = fadeColor[1];
+	overlayImage.green = fadeColor[2];
+	overlayImage.blue = fadeColor[3];
+
+	while (currentTime < fadeInDuration) {
+		currentTime += timeDeltaTime;
+		overlayImage.alpha = std::lerp(start, 1, currentTime / fadeInDuration);
+		co_yield Step::Frame;
+	}
+
+	overlayImage.alpha = 1;
+
+	teleport();
+
+	//EnableMovement();
+	player_movement_t::canMove = true;
+
+	currentTime = 0;
+	start = overlayImage.alpha;
+	while (currentTime < fadeOutDuration) {
+		currentTime += timeDeltaTime;
+		overlayImage.alpha = std::lerp(start, 0, currentTime / fadeOutDuration);
+		co_yield Step::Frame;
+	}
+	overlayImage.alpha = 0;
 }
 
 void teleporter_t::teleport() {
@@ -3486,6 +3684,11 @@ void teleporter_t::teleport() {
 		// TODO this is wrong
 		playa->rotation = gameObjects[destinationIndex]->rotation;
 	}
+}
+
+void tv_programming_t::update(float deltaTime) {
+	totalTime += deltaTime;
+	gameObject->materials[0] = ::materials[materials[(size_t)(totalTime / materialRate) % materialCount]];
 }
 
 void box_collider_t::update(float deltaTime) {
@@ -3800,6 +4003,8 @@ void queueCoroutine(Task&& coroutine) {
 
 // TODO: move to some header
 void InitializeFlowMachines();
+void InitializeAudioClips();
+void InitializeAudioSources();
 
 void positionUpdate() {
 	for (auto go: gameObjects) {
@@ -3998,6 +4203,8 @@ int main(int argc, const char** argv) {
 	InitializeComponents(gameObjects);
 	InitializeFonts();
 	InitializeFlowMachines();
+	InitializeAudioClips();
+	InitializeAudioSources();
 
     unsigned currentStamp = 0;
 
@@ -4049,6 +4256,21 @@ int main(int argc, const char** argv) {
 	// initial positions
 	positionUpdate();
 	physicsUpdate(0.01);
+
+	for (auto go: gameObjects) {
+		if (go->isActive()) {
+			audio_source_t** audioSources = go->getComponents<audio_source_t>();
+
+			if (audioSources) {
+				do {
+					auto audioSource = *audioSources;
+					if (audioSource->enabled){
+						audioSource->awake();
+					}
+				} while(*++audioSources);
+			}
+		}
+	}
 
     auto tp_last_frame = std::chrono::system_clock::now() - std::chrono::milliseconds(16);
     for(;;) {
@@ -4145,6 +4367,20 @@ int main(int argc, const char** argv) {
 			}
 		}
 
+		for (auto play_sound = play_sounds; *play_sound; play_sound++) {
+			if ((*play_sound)->gameObject->isActive()) {
+				// (*play_sound)->update(deltaTime);
+			}
+		}
+
+		for (auto tv_programming = tv_programmings; *tv_programming; tv_programming++) {
+			if ((*tv_programming)->gameObject->isActive()) {
+				(*tv_programming)->update(deltaTime);
+			}
+		}
+
+		
+
 		// ugly hack: coroutines are after position set
 
 		positionUpdate();
@@ -4173,6 +4409,19 @@ int main(int argc, const char** argv) {
 		if (!currentCamera) {
 			std::cout << "No active camera found" << std::endl;
 			continue;
+		}
+
+		for (auto interactable_message = interactable_messages; *interactable_message; interactable_message++) {
+			if ((*interactable_message)->gameObject->isActive()) {
+				(*interactable_message)->update(currentCamera->gameObject);
+			}
+		}
+
+		// ANOTHER HACK: audio sources
+		for (auto audio_source = audio_sources; *audio_source; audio_source++) {
+			if ((*audio_source)->gameObject->isActive()) {
+				(*audio_source)->update(playa);
+			}
 		}
 
         currentCamera->beforeRender(4.0f / 3.0f);
@@ -4222,8 +4471,6 @@ int main(int argc, const char** argv) {
 		do {
 			renderSelfAndChildren<1>(currentCamera, gameObjects[*rootNum++]);
 		} while(*rootNum != SIZE_MAX);
-
-
 		
         pvr_list_finish();
 		
@@ -4238,10 +4485,103 @@ int main(int argc, const char** argv) {
 		std::cout << total_idx << std::endl;
 		#endif
 
+		if (overlayImage.alpha != 0) {
+			// draw a full screen quad
+			pvr_poly_hdr_t hdr;
+			pvr_poly_cxt_col_fast(
+				&hdr,
+				PVR_LIST_TR_POLY,
+				PVR_CLRFMT_4FLOATS,
+				PVR_BLEND_SRCALPHA,
+				PVR_BLEND_INVSRCALPHA,
+				PVR_DEPTHCMP_ALWAYS,
+				PVR_DEPTHWRITE_DISABLE,
+				PVR_CULLING_NONE,
+				PVR_FOG_DISABLE
+			);
+			pvr_prim(&hdr, sizeof(hdr));
+
+
+			pvr_vertex32_ut vtx[4];
+			vtx[0].flags = PVR_CMD_VERTEX;
+			vtx[0].x = 0;
+			vtx[0].y = 0;
+			vtx[0].z = 1;
+			vtx[0].a = overlayImage.alpha;
+			vtx[0].r = overlayImage.red;
+			vtx[0].g = overlayImage.green;
+			vtx[0].b = overlayImage.blue;
+
+			vtx[1].flags = PVR_CMD_VERTEX;
+			vtx[1].x = 0;
+			vtx[1].y = 480;
+			vtx[1].z = 1;
+			vtx[1].a = overlayImage.alpha;
+			vtx[1].r = overlayImage.red;
+			vtx[1].g = overlayImage.green;
+			vtx[1].b = overlayImage.blue;
+
+			// Extend to generate a triangle strip
+			vtx[2].flags = PVR_CMD_VERTEX;
+			vtx[2].x = 640;
+			vtx[2].y = 0;
+			vtx[2].z = 1;
+			vtx[2].a = overlayImage.alpha;
+			vtx[2].r = overlayImage.red;
+			vtx[2].g = overlayImage.green;
+			vtx[2].b = overlayImage.blue;
+
+			vtx[3].flags = PVR_CMD_VERTEX_EOL; // End of triangle strip
+			vtx[3].x = 640;
+			vtx[3].y = 480;
+			vtx[3].z = 1;
+			vtx[3].a = overlayImage.alpha;
+			vtx[3].r = overlayImage.red;
+			vtx[3].g = overlayImage.green;
+			vtx[3].b = overlayImage.blue;
+
+			pvr_prim(vtx, sizeof(pvr_vertex32_ut) * 4);
+		}
+
 		// drawTextCentered(&fonts_19, 24, 320, 240, "Hello M World", 1, 1, 0.1, 0.1);
 		// drawTextCentered(&fonts_0, 11, 320, 240 + 100, "Hello M World", 1, 1, 0.1, 0.1);
+		if (choices_options) {
+			// TODO: don't recalc every frame
+			int choices_count = 0;
+			while(choices_options[++choices_count])
+				;
+			
+			int drawY = 440;
+			for (int choice = choices_count-1; choice >= 0; choice--) {
+				bool current = choice_current == choice;
+				drawTextLeftBottom(&fonts_0, 15, 40, drawY, choices_options[choice], 1, current, 1, current);
+				drawY -= 18;
+			}
+			if (choices_prompt) {
+				drawTextLeftBottom(&fonts_1, 20, 40, drawY, choices_prompt, 1, 1, 0.1, 0.1);
+			}
 
-		if (messageText) {
+			auto contMaple = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+			if (contMaple) {
+				auto state = (cont_state_t *)maple_dev_status(contMaple);
+				if (state) {
+					static bool old_down = !state->dpad_down;
+					if (!old_down && state->dpad_down && choice_current > 0) {
+						choice_current--;
+					}
+					old_down = state->dpad_down;
+					static bool old_up = !state->dpad_up;
+					if (!old_up && state->dpad_up && choice_current < (choices_count-1)) {
+						choice_current++;
+					}
+					old_up = state->dpad_up;
+
+					if (state->a) {
+						choice_chosen = choice_current;
+					}
+				}
+			}
+		} else if (messageText) {
 			if (messageSpeaker) {
 				drawTextLeftBottom(&fonts_1, 20, 40, 390, messageSpeaker, 1, 1, 1, 1);
 			}

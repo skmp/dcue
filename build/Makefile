@@ -14,11 +14,26 @@ DATA_DIR=repack-data/tlj
 # include common.mk
 include reactphysics3d.mk
 OBJS = \
-	../main.o ../pavo/pavo.o ../vendor/gldc/alloc.o ../first_level/hierarchy.o ../first_level/components.o ../first_level/animations.o ../first_level/cameras.o ../first_level/audio_sources.o ../first_level/audio_clips.o ../first_level/scripts.o ../first_level/physics.o ../first_level/fonts.o ../first_level/flowmachines.o \
+	../main.o \
+	../audio_driver.o \
+	../pavo/pavo.o \
+	../vendor/gldc/alloc.o \
+	../vendor/dca3/thread.o \
+	../first_level/hierarchy.o \
+	../first_level/components.o \
+	../first_level/animations.o \
+	../first_level/cameras.o \
+	../first_level/audio_sources.o \
+	../first_level/audio_clips.o \
+	../first_level/scripts.o \
+	../first_level/physics.o \
+	../first_level/fonts.o \
+	../first_level/flowmachines.o \
 	\
 	$(RP3D_OBJECTS)
+	
 
-DEPS_OBJS=$(OBJS:.o=.d)
+DEPS_OBJS=$(OBJS:.o=.d) $(OBJS_NATIVE:.o=.d`)
 
 OBJS_SIM=$(OBJS:.o=.sim.o) \
 	../vendor/koshle/hlekos.sim.o \
@@ -137,6 +152,15 @@ repack-data/fonts.repacked: $(shell ls fonts/font_*.png) | pvrtex
 		../vendor/pvrtex/pvrtex -i repack-data/fonts/$$(basename $${i}) -o repack-data/tlj/fonts/$$(basename $${i%.png}.pvr) -c small -d; \
 	done
 	@echo && echo && echo "*** Repacked Fonts ***" && echo && echo
+	@touch $@
+
+repack-data/audio.repacked: $(shell ls audio/*.wav) aud2adpcm
+	@mkdir -p repack-data/tlj
+	@mkdir -p repack-data/tlj/audio
+	@for i in $(shell ls audio/*.wav); do \
+		./aud2adpcm -rawm audio/$$(basename $${i}) repack-data/tlj/audio/$$(basename $${i%.wav}.raw); \
+	done
+	@echo && echo && echo "*** Repacked Audio ***" && echo && echo
 	@touch $@
 .PHONY: pvrtex cdi sim
 

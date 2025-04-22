@@ -578,6 +578,8 @@ int main(int argc, char **argv) {
             return aud2adpcm(argv[2], argv[3], 1, 1, 1);      
         } else if (!strcmp(argv[1], "-raw")) {
             return aud2adpcm(argv[2], argv[3], 0, 0, 0);
+        } else if (!strcmp(argv[1], "-rawm")) {
+            return aud2adpcm(argv[2], argv[3], 0, 1, 0);
         } else {
             usage();
             return 1;

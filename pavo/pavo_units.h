@@ -132,14 +132,29 @@ struct pavo_unit_dispense_item_t: pavo_unit_t {
     pavo_unit_dispense_item_t(pavo_unit_t* onExit, const char* item): onExit(onExit), item(item) { }
 };
 
+extern const char* choices_prompt;
+extern const char** choices_options;
+extern int choice_chosen;
+extern int choice_current;
 struct pavo_unit_show_choice_t: pavo_unit_t {
     pavo_unit_t** onChoices;
     pavo_unit_t* after;
     const char* prompt;
     const char** options;
     Task enter() override {
-        // TODO: Implement choice UI
-        return onChoices[0]->enter();
+        choice_chosen = -1;
+        choice_current = 0;
+        choices_prompt = prompt;
+        choices_options = options;
+
+        while (choice_chosen == -1) {
+            co_yield Step::Frame;
+        }
+
+        choices_prompt = nullptr;
+        choices_options = nullptr;
+
+        co_yield onChoices[choice_chosen]->enter();
     }
 
     pavo_unit_show_choice_t(pavo_unit_t** onChoices, pavo_unit_t* after, const char* prompt, const char** options): onChoices(onChoices), after(after), prompt(prompt), options(options) { }

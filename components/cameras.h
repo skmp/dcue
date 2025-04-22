@@ -5,6 +5,8 @@ using namespace native;
 #include "dc/matrix.h"
 
 struct camera_t {
+    static constexpr component_type_t componentType = ct_camera;
+
     game_object_t* gameObject;
 
     float fov;

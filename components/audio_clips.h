@@ -8,4 +8,9 @@ struct audio_clip_t {
     uint32_t totalSamples;
     uint32_t sampleRate;
     const char* file;
+
+    uintptr_t sfxData;
 };
+
+extern audio_clip_t* audio_clips[];
+void InitializeAudioClips();

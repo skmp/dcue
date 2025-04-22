@@ -18,11 +18,13 @@ struct mouse_look_t;
 struct interactable_t;
 struct teleporter_t;
 struct pavo_interactable_t;
+struct interactable_message_t;
+struct tv_programming_t;
 
 // interactions
 /*
 - ShowMessage
-PlaySound
+- PlaySound
 - gameobjectactiveinactive2
 GameObjectActiveInactive
 ObjectDispenser
@@ -40,6 +42,7 @@ struct show_message_t;
 struct teleporter_trigger_t;
 struct zoom_in_out_t;
 struct cant_move_t;
+struct play_sound_t;
 
 // interaction list
 struct interaction_t;
@@ -63,6 +66,8 @@ enum component_type_t {
     ct_interactable,
     ct_teleporter,
     ct_pavo_interactable,
+    ct_interactable_message,
+    ct_tv_programming,
 
     // physics
     ct_box_collider,
@@ -79,6 +84,7 @@ enum component_type_t {
     ct_teleporter_trigger,
     ct_zoom_in_out,
     ct_cant_move,
+    ct_play_sound,
 
     ct_eol = -1
 };
@@ -104,6 +110,8 @@ struct component_t {
         interactable_t** interactables;
         teleporter_t** teleporters;
         pavo_interactable_t** pavoInteractables;
+        interactable_message_t** interactableMessages;
+        tv_programming_t** tvProgrammings;
 
         // interactions
         game_object_activeinactive_t** gameObjectActiveinactives;
@@ -113,6 +121,7 @@ struct component_t {
         teleporter_trigger_t** teleporterTriggers;
         zoom_in_out_t** zoomInOuts;
         cant_move_t** cantMoves;
+        play_sound_t** playSounds;
 
         // interactions list
         interaction_t** interactions;
