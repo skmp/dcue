@@ -2804,22 +2804,23 @@ void setGameObject(component_type_t type, component_base_t* component, native::g
 }
 
 void animator_t::update(float deltaTime) {
+	bool endOfAnimation = false;
     currentTime += deltaTime;
     for (size_t i = 0; i < num_bound_animations; ++i) {
         auto& boundAnim = bound_animations[i];
         for (size_t j = 0; j < boundAnim.animation->num_tracks; ++j) {
             auto& track = boundAnim.animation->tracks[j];
             auto& currentFrame = boundAnim.currentFrames[j];
-            if (currentFrame >= track.num_keys - 1) {
-                continue;
-            }
             while (currentFrame < track.num_keys - 1 && currentTime >= track.times[currentFrame + 1]) {
                 ++currentFrame;
             }
+			float effectiveTime = currentTime;
             if (currentFrame >= track.num_keys - 1) {
-                currentFrame = track.num_keys - 1;
+                endOfAnimation = true;
+				currentFrame = 0;
+				effectiveTime = 0;
             }
-            float t = (currentTime - track.times[currentFrame]) / (track.times[currentFrame + 1] - track.times[currentFrame]);
+            float t = (effectiveTime - track.times[currentFrame]) / (track.times[currentFrame + 1] - track.times[currentFrame]);
             auto& value = track.values[currentFrame];
             auto& nextValue = track.values[currentFrame + 1];
             if (boundAnim.bindings[j] == SIZE_MAX) {
@@ -2919,6 +2920,11 @@ void animator_t::update(float deltaTime) {
             }
         }
     }
+
+	if (endOfAnimation) {
+		// For now, always loop
+		currentTime = 0;
+	}
 }
 
 bool native::game_object_t::isActive() const {
@@ -4722,7 +4728,7 @@ int main(int argc, const char** argv) {
 			int drawY = 440;
 			for (int choice = choices_count-1; choice >= 0; choice--) {
 				bool current = choice_current == choice;
-				drawTextLeftBottom(&fonts_0, 15, 40, drawY, choices_options[choice], 1, current, 1, current);
+				drawTextLeftBottom(&fonts_0, 15, 40, drawY, choices_options[choice], 1, !current, 1, !current);
 				drawY -= 18;
 			}
 			if (choices_prompt) {
