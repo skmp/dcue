@@ -5,6 +5,7 @@
 #include <cassert>
 #include "vendor/dca3/thread.h"
 #include <iostream>
+#include <queue>
 
 #if defined(DC_SH4)
 #include <dc/sound/sound.h>
@@ -179,6 +180,42 @@ static struct {
 } sfx_channel[MAX_SFX_CHANNELS];
 
 static dc::Thread snd_thread;
+static dc::Thread io_thread;
+
+struct io_request_t {
+    int fd;
+    size_t offset;
+    void* buffer;
+    size_t size;
+};
+std::queue<io_request_t> requests;
+static semaphore_t requests_sema = SEM_INITIALIZER(0);
+
+void queue_read(int fd, size_t offset, void* buffer, size_t size) {
+    auto mask = irq_disable();
+    requests.emplace(fd, offset, buffer, size);
+    irq_restore(mask);
+    sem_signal(&requests_sema);
+}
+
+void* audio_io_thread(void*) {
+    for (;;) {
+        sem_wait(&requests_sema);
+
+        try_again:
+        auto mask = irq_disable();
+        if (requests.size() == 0) {
+            irq_restore(mask);
+            continue;
+        }
+        auto request = requests.front();
+        requests.pop();
+        irq_restore(mask);
+        fs_seek(request.fd, request.offset, SEEK_SET);
+        fs_read(request.fd, request.buffer, request.size);
+        goto try_again;
+    }
+}
 
 void* audio_periodical(void*) {
     for(;;) {
@@ -289,10 +326,7 @@ void* audio_periodical(void*) {
                 
                 if (do_read) {
                     streamf("Queueing stream read: %d, file: %d, buffer: %p, size: %d, file_offset: %d\n", i, streams[i].fd, streams[i].buffer, do_read, streams[i].file_offset);
-                    // CdStreamQueueAudioRead(streams[i].fd, streams[i].buffer, do_read, streams[i].file_offset);
-                    // TODO: move to an IO thread
-                    fs_seek(streams[i].fd, streams[i].file_offset, SEEK_SET);
-                    fs_read(streams[i].fd, streams[i].buffer, do_read);
+                    queue_read(streams[i].fd, streams[i].file_offset, streams[i].buffer, do_read);
                     streams[i].file_offset += do_read;
                 }
             }
@@ -365,6 +399,7 @@ void InitializeAudioClips() {
     }
 
     snd_thread.spawn("Audio Streamer", 1024 * 2, true, &audio_periodical);
+    io_thread.spawn("IO Thread", 1024, true, &audio_io_thread);
 }
 
 int find_audio_source_num(audio_source_t* ptr) {
@@ -413,8 +448,6 @@ void audio_source_t::play() {
                 if (streams[i].source == nullptr) {
                     int f = fs_open(this->clip->file, O_RDONLY);
                     assert(f >= 0);
-                    streams[i].source = this;
-                    this->playingChannel = i;
 
                     auto nStream = i;
                     streams[nStream].rate = (int)(this->clip->sampleRate * this->pitch);
@@ -436,7 +469,7 @@ void audio_source_t::play() {
 
                     // streamf("PreloadStreamedFile: %s: stream: %d, freq: %d, chans: %d, byte size: %d, played samples: %d\n", DCStreamedNameTable[nFile], nStream, hdr.samplesPerSec, hdr.numOfChan, hdr.dataSize, streams[nStream].played_samples);
                 
-
+                    irq_restore(mask);
                     #if 0
                     // Read directly in the future
                     fs_read(f, SPU_RAM_UNCACHED_BASE_U8 + streams[nStream].aica_buffers[0], STREAM_STAGING_READ_SIZE_MONO);
@@ -457,7 +490,12 @@ void audio_source_t::play() {
                         fs_read(f, streams[nStream].buffer, streams[nStream].stereo ? STREAM_STAGING_READ_SIZE_STEREO : STREAM_STAGING_READ_SIZE_MONO);
                     }
 
+                    mask = irq_disable();
                     streams[nStream].file_offset = fs_tell(f);
+
+                    // mark as playing
+                    streams[i].source = this;
+                    this->playingChannel = i;
 
                     aica_play_chn(
                         streams[nStream].mapped_ch[0],
