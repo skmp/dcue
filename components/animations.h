@@ -57,12 +57,14 @@ struct animation_track_t {
 struct animation_t {
     animation_track_t* tracks;
     size_t num_tracks;
+    float maxTime;
 };
 
 struct bound_animation_t {
     animation_t* animation;
     size_t* bindings;
     unsigned* currentFrames;
+    float currentTime;
 };
 
 struct animator_t {
@@ -72,7 +74,6 @@ struct animator_t {
     bound_animation_t* bound_animations;
     size_t num_bound_animations;
     size_t gameObjectIndex;
-    float currentTime;
 
     void update(float deltaTime);
 };

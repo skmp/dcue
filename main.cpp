@@ -2804,25 +2804,32 @@ void setGameObject(component_type_t type, component_base_t* component, native::g
 }
 
 void animator_t::update(float deltaTime) {
-	bool endOfAnimation = false;
-    currentTime += deltaTime;
+    
     for (size_t i = 0; i < num_bound_animations; ++i) {
         auto& boundAnim = bound_animations[i];
+		auto& currentTime = boundAnim.currentTime;
+		currentTime += deltaTime;
         for (size_t j = 0; j < boundAnim.animation->num_tracks; ++j) {
             auto& track = boundAnim.animation->tracks[j];
             auto& currentFrame = boundAnim.currentFrames[j];
             while (currentFrame < track.num_keys - 1 && currentTime >= track.times[currentFrame + 1]) {
                 ++currentFrame;
             }
+			bool fakeInterpolation = false;
 			float effectiveTime = currentTime;
             if (currentFrame >= track.num_keys - 1) {
-                endOfAnimation = true;
-				currentFrame = 0;
-				effectiveTime = 0;
+				currentFrame = track.num_keys - 2;
+				effectiveTime = track.times[currentFrame + 1];
+				fakeInterpolation = true;
             }
             float t = (effectiveTime - track.times[currentFrame]) / (track.times[currentFrame + 1] - track.times[currentFrame]);
-            auto& value = track.values[currentFrame];
-            auto& nextValue = track.values[currentFrame + 1];
+            auto value = track.values[currentFrame];
+            auto nextValue = track.values[currentFrame + 1];
+
+			if (fakeInterpolation) {
+				value = nextValue;
+			}
+
             if (boundAnim.bindings[j] == SIZE_MAX) {
                 continue;
             }
@@ -2921,9 +2928,15 @@ void animator_t::update(float deltaTime) {
         }
     }
 
-	if (endOfAnimation) {
-		// For now, always loop
-		currentTime = 0;
+	for (size_t i = 0; i < num_bound_animations; ++i) {
+		auto& boundAnim = bound_animations[i];
+		if (boundAnim.currentTime >= boundAnim.animation->maxTime) {
+			boundAnim.currentTime = 0;
+			
+			for (size_t j = 0; j < boundAnim.animation->num_tracks; ++j) {
+				boundAnim.currentFrames[j] = 0;
+			}
+		}
 	}
 }
 
