@@ -214,6 +214,9 @@ std::vector<material_t**> material_groups;
 std::vector<mesh_t*> meshes;
 std::vector<game_object_t*> gameObjects;
 
+texture_t* skybox[6];
+RGBAf skyboxTint;
+
 void load_pvr(const char *fname, texture_t* texture) {
     FILE *tex = NULL;
     PVRHeader HDR;
@@ -287,7 +290,7 @@ bool loadScene(const char* scene) {
     // Read and verify header (8 bytes)
     char header[9] = { 0};
     in.read(header, 8);
-    if (strncmp(header, "DCUENS02", 8) != 0) {
+    if (strncmp(header, "DCUENS03", 8) != 0) {
         std::cout << "Invalid file header: " << header << std::endl;
         return false;
     }
@@ -386,6 +389,17 @@ bool loadScene(const char* scene) {
         go->submesh_count = submesh_count;
     }
 
+	for (int i = 0; i < 6; i++) {
+		in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp));
+		skybox[i] = textures[tmp];
+	}
+
+	in.read(reinterpret_cast<char*>(&skyboxTint.alpha), sizeof(skyboxTint.alpha));
+	in.read(reinterpret_cast<char*>(&skyboxTint.red), sizeof(skyboxTint.red));
+	in.read(reinterpret_cast<char*>(&skyboxTint.green), sizeof(skyboxTint.green));
+	in.read(reinterpret_cast<char*>(&skyboxTint.blue), sizeof(skyboxTint.blue));
+
+	assert(!in.bad());
     in.close();
     printf("Loaded %d textures, %d materials, %d meshes, and %d game objects.\n",
            static_cast<int>(textures.size()), static_cast<int>(materials.size()),
@@ -4182,6 +4196,150 @@ void renderSelfAndChildren(camera_t* cam, game_object_t* go) {
 	}
 }
 
+static vec3f skybox_face_verts[6][4] = {
+	/* +X */ {{ 1,-1, 1},{ 1,-1,-1},{ 1, 1,-1},{ 1, 1, 1}},
+	/* -X */ {{-1,-1,-1},{-1,-1, 1},{-1, 1, 1},{-1, 1,-1}},
+	/* +Y */ {{-1, 1,-1},{-1, 1, 1},{ 1, 1, 1},{ 1, 1,-1}},
+	/* -Y */ {{ 1,-1,-1},{ 1,-1, 1},{-1,-1, 1},{-1,-1,-1}},
+	/* +Z */ {{-1,-1, 1},{ 1,-1, 1},{ 1, 1, 1},{-1, 1, 1}},
+	/* -Z */ {{ 1,-1,-1},{-1,-1,-1},{-1, 1,-1},{ 1, 1,-1}},
+};
+
+/* simple (0,0)->(1,1) UVs for each quad */
+static const float skybox_face_uvs[4][2] = {
+	{0.0f, 1.0f},
+	{1.0f, 1.0f},
+	{1.0f, 0.0f},
+	{0.0f, 0.0f},
+};
+
+static int skybox_face_tex_remap[6] = { 5, 4, 2, 3, 0, 1};
+typedef struct {
+    float x,y,z,w;
+    float u,v;
+} skyvert_t;
+static int clip_against_near(const skyvert_t *in, int in_cnt,
+							 skyvert_t *out)
+{
+	int out_cnt = 0;
+	for (int i = 0; i < in_cnt; ++i)
+	{
+		const skyvert_t *A = &in[i];
+		const skyvert_t *B = &in[(i + 1) % in_cnt];
+		float da = A->z + A->w;
+		float db = B->z + B->w;
+
+		// keep A if it's inside
+		if (da >= 0.0f)
+		{
+			out[out_cnt++] = *A;
+		}
+		// if edge crosses, find intersection, but only if denom != 0
+		if ((da >= 0.0f) ^ (db >= 0.0f))
+		{
+			float denom = da - db;
+			if (fabsf(denom) > 1e-6f)
+			{
+				float t = da / denom;
+				if (t > 0.0f && t < 1.0f)
+				{
+					skyvert_t I;
+					I.x = A->x + t * (B->x - A->x);
+					I.y = A->y + t * (B->y - A->y);
+					I.z = A->z + t * (B->z - A->z);
+					I.w = A->w + t * (B->w - A->w);
+					I.u = A->u + t * (B->u - A->u);
+					I.v = A->v + t * (B->v - A->v);
+					out[out_cnt++] = I;
+				}
+			}
+		}
+	}
+	return out_cnt;
+}
+static void render_skybox(camera_t* camera) {
+    /* intermediate buffers */
+    skyvert_t tmp_in[4], tmp_out[8];
+    vector_t transformed[24];
+    pvr_dr_state_t dr_state;
+    pvr_poly_hdr_t   hdr;
+
+	pvr_dr_init(&dr_state);
+
+    /* 1) build clip-space verts */
+    mat_load(&camera->devViewProjScreenSkybox);
+
+	vec3f* face = skybox_face_verts[0];
+	vector_t* xformed = transformed;
+    for (unsigned i = 24; i != 0; i--) {
+		mat_trans_nodiv_nomod(face->x, face->y, face->z, xformed->x, xformed->y, xformed->z, xformed->w);
+		face++;
+		xformed++;
+	}
+
+    for(int f = 0; f < 6; ++f) {
+        for(int j = 0; j < 4; ++j) {
+            vector_t *v4 = &transformed[f*4 + j];
+            tmp_in[j].x = v4->x;  tmp_in[j].y = v4->y;
+            tmp_in[j].z = v4->z;  tmp_in[j].w = v4->w;
+            tmp_in[j].u = skybox_face_uvs[j][0];
+            tmp_in[j].v = skybox_face_uvs[j][1];
+        }
+
+        int nverts = clip_against_near(tmp_in, 4, tmp_out);
+        if(nverts < 3) continue;
+
+		auto tex = skybox[skybox_face_tex_remap[f]];
+
+        pvr_poly_cxt_txr_fast(
+            &hdr,
+            PVR_LIST_OP_POLY,
+
+            tex->flags,
+            tex->lw,
+            tex->lh,
+            (uint8_t*)tex->data - tex->offs,
+
+            PVR_FILTER_BILINEAR,
+            PVR_UVFLIP_NONE, PVR_UVCLAMP_U,
+            PVR_UVFLIP_NONE, PVR_UVCLAMP_V,
+            PVR_UVFMT_32BIT,
+            PVR_CLRFMT_4FLOATS,
+            PVR_BLEND_ONE, PVR_BLEND_ZERO,
+            PVR_DEPTHCMP_ALWAYS, PVR_DEPTHWRITE_DISABLE,
+            PVR_CULLING_NONE, PVR_FOG_DISABLE
+        );
+
+		pvr_prim(&hdr, sizeof(hdr));
+        // triangulate as a fan, but emit each triangle as a 3-vert strip
+        for(int t = 1; t < nverts - 1; ++t) {
+            skyvert_t *tri[3] = {
+                &tmp_out[0],
+                &tmp_out[t],
+                &tmp_out[t + 1]
+            };
+            for(int k = 0; k < 3; ++k) {
+                pvr_vertex64_t *pv = (pvr_vertex64_t *)pvr_dr_target(dr_state);
+                pv->flags = (k == 2) ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+                float iw = 1.0f / tri[k]->w;
+                pv->x    = tri[k]->x * iw;
+                pv->y    = tri[k]->y * iw;
+                pv->z    = iw;
+                pv->uf32 = tri[k]->u;
+                pv->vf32 = tri[k]->v;
+                pvr_dr_commit(pv);
+
+                pv->a = skyboxTint.alpha;
+				pv->r = skyboxTint.red;
+				pv->g = skyboxTint.green;
+				pv->b = skyboxTint.blue;
+
+				pvr_dr_commit(reinterpret_cast<uint8_t*>(pv) + 32);
+            }
+        }
+    }
+}
+
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -4308,7 +4466,7 @@ int main(int argc, const char** argv) {
 
 		timeDeltaTime = deltaTime;
 
-        
+
 		// components
         for(auto& animator: animators) {
 			if (gameObjects[animator->gameObjectIndex]->isActive()) {
@@ -4445,6 +4603,8 @@ int main(int argc, const char** argv) {
 		// render frame
 		memset(zBuffer, 0, sizeof(zBuffer));
 		
+		enter_oix(); // renderSelfAndChildren<0> uses OCR_BUFFER for temps
+
 		rootNum = roots;
 		do {
 			renderSelfAndChildren<0>(currentCamera, gameObjects[*rootNum++]);
@@ -4471,13 +4631,12 @@ int main(int argc, const char** argv) {
 		total_idx = 0;
 		#endif
 
-        enter_oix();
-
         pvr_scene_begin();
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_OP_POLY);
 
-		
+		render_skybox(currentCamera);
+
 		rootNum = roots;
 		do {
 			renderSelfAndChildren<1>(currentCamera, gameObjects[*rootNum++]);
@@ -4554,8 +4713,6 @@ int main(int argc, const char** argv) {
 			pvr_prim(vtx, sizeof(pvr_vertex32_ut) * 4);
 		}
 
-		// drawTextCentered(&fonts_19, 24, 320, 240, "Hello M World", 1, 1, 0.1, 0.1);
-		// drawTextCentered(&fonts_0, 11, 320, 240 + 100, "Hello M World", 1, 1, 0.1, 0.1);
 		if (choices_options) {
 			// TODO: don't recalc every frame
 			int choices_count = 0;

@@ -15,6 +15,7 @@ struct camera_t {
 
     // internal state
     matrix_t devViewProjScreen;
+    matrix_t devViewProjScreenSkybox;
     Plane frustumPlanes[6];
 
     V2d viewOffset;
@@ -188,6 +189,14 @@ struct camera_t {
         mat_apply((matrix_t*)&proj[0]);
         mat_apply((matrix_t*)&view[0]);
         mat_store((matrix_t*)&devViewProjScreen);
+
+        view[12] = 0;
+        view[13] = 0;
+        view[14] = 0;
+        mat_load((matrix_t*)&DCE_MAT_SCREENVIEW);
+        mat_apply((matrix_t*)&proj[0]);
+        mat_apply((matrix_t*)&view[0]);
+        mat_store((matrix_t*)&devViewProjScreenSkybox);
     }
     
     enum { SPHEREOUTSIDE, SPHEREBOUNDARY, SPHEREINSIDE, SPHEREBOUNDARY_NEAR /* frustumTestSphereEx only */};

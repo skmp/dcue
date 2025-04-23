@@ -588,6 +588,8 @@ std::vector<material_t*> materials;
 std::vector<mesh_t*> meshes;
 std::vector<terrain_t*> terrains;
 std::vector<game_object_t*> gameObjects;
+size_t skybox[6];
+RGBAf skyboxTint;
 
 // Helper to read a 7-bit encoded int (as written by .NET's BinaryWriter)
 int read7BitEncodedInt(std::ifstream &in) {
@@ -623,7 +625,7 @@ void loadDreamScene(const char *scene) {
     // Read and verify header (8 bytes)
     char header[8];
     in.read(header, 8);
-    if (std::string(header, 8) != "DCUE0003") {
+    if (std::string(header, 8) != "DCUE0004") {
         printf("Invalid file header\n");
         exit(1);
     }
@@ -912,6 +914,17 @@ void loadDreamScene(const char *scene) {
         gameObjects.push_back(go);
     }
 
+	for (int i = 0; i < 6; i++) {
+		int skyboxTextureNum = 0;
+		in.read(reinterpret_cast<char*>(&skyboxTextureNum), sizeof(int));
+		skybox[i] = skyboxTextureNum;
+	}
+	in.read(reinterpret_cast<char*>(&skyboxTint.alpha), sizeof(skyboxTint.alpha));
+	in.read(reinterpret_cast<char*>(&skyboxTint.red), sizeof(skyboxTint.red));
+	in.read(reinterpret_cast<char*>(&skyboxTint.green), sizeof(skyboxTint.green));
+	in.read(reinterpret_cast<char*>(&skyboxTint.blue), sizeof(skyboxTint.blue));
+
+	assert(!in.bad());
     in.close();
     printf("Loaded %d textures, %d materials, %d meshes, %d terrains, %d game objects.\n",
            static_cast<int>(textures.size()), static_cast<int>(materials.size()),
@@ -1730,7 +1743,7 @@ int main(int argc, const char** argv) {
 
 	auto outfile = std::ofstream(argv[2]);
 
-    outfile.write("DCUENS02", 8);
+    outfile.write("DCUENS03", 8);
     
 	uint32_t tmp;
 
@@ -1808,8 +1821,16 @@ int main(int argc, const char** argv) {
 				outfile.write((char*)&tmp, sizeof(tmp));
 			}
 		}
-		
 	}
+
+	for (int i = 0; i < 6; i++) {
+		tmp = native_textures_index[textures[skybox[i]]];
+		outfile.write((char*)&tmp, sizeof(tmp));
+	}
+	outfile.write(reinterpret_cast<char*>(&skyboxTint.alpha), sizeof(skyboxTint.alpha));
+	outfile.write(reinterpret_cast<char*>(&skyboxTint.red), sizeof(skyboxTint.red));
+	outfile.write(reinterpret_cast<char*>(&skyboxTint.green), sizeof(skyboxTint.green));
+	outfile.write(reinterpret_cast<char*>(&skyboxTint.blue), sizeof(skyboxTint.blue));
 
 	return 0;
 
