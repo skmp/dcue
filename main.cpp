@@ -2924,6 +2924,13 @@ void animator_t::update(float deltaTime) {
 					}
 				}
 				break;
+
+				case MeshRenderer_m_Materials_0:
+				{
+					if (target->mesh) {
+						target->materials[0] = materials[value];
+					}
+				}
             }
         }
     }

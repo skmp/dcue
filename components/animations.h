@@ -45,6 +45,8 @@ enum animation_property_key
     Transform_m_LocalScale_x,
     Transform_m_LocalScale_y,
     Transform_m_LocalScale_z,
+
+    MeshRenderer_m_Materials_0,
 };
 
 struct animation_track_t {
