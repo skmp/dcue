@@ -4761,12 +4761,12 @@ int main(int argc, const char** argv) {
 				if (state) {
 					static bool old_down = !state->dpad_down;
 					if (!old_down && state->dpad_down && choice_current > 0) {
-						choice_current--;
+						choice_current++;
 					}
 					old_down = state->dpad_down;
 					static bool old_up = !state->dpad_up;
 					if (!old_up && state->dpad_up && choice_current < (choices_count-1)) {
-						choice_current++;
+						choice_current--;
 					}
 					old_up = state->dpad_up;
 

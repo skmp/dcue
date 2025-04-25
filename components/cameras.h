@@ -11,16 +11,17 @@ struct camera_t {
 
     float fov;
     float nearPlane;
-    float farPlane;
-
+    float farPlaneUnity;
+    
     // internal state
     matrix_t devViewProjScreen;
     matrix_t devViewProjScreenSkybox;
     Plane frustumPlanes[6];
-
+    
     V2d viewOffset;
     V2d viewWindow;
     V3d frustumCorners[8];
+    float farPlane;
 
     void buildPlanes()
     {
@@ -105,6 +106,7 @@ struct camera_t {
     }
 
     void beforeRender(float aspect) {
+        farPlane = farPlaneUnity / 4;
         setFOV(fov, aspect);
         buildClipPersp();
         
