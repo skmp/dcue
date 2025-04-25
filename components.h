@@ -26,12 +26,12 @@ struct tv_programming_t;
 - ShowMessage
 - PlaySound
 - gameobjectactiveinactive2
-GameObjectActiveInactive
-ObjectDispenser
+- GameObjectActiveInactive
+- ObjectDispenser
 - timedactiveinactive
 - Fadein
 - CantMove
-Fadeout
+- Fadeout
 - TeleporterTrigger
 - zoomout
 */
@@ -43,6 +43,9 @@ struct teleporter_trigger_t;
 struct zoom_in_out_t;
 struct cant_move_t;
 struct play_sound_t;
+struct object_dispenser_t;
+struct recusrive_game_object_activeinactive_t;
+struct fadeout_t;
 
 // interaction list
 struct interaction_t;
@@ -85,6 +88,9 @@ enum component_type_t {
     ct_zoom_in_out,
     ct_cant_move,
     ct_play_sound,
+    ct_object_dispenser,
+    ct_recusrive_game_object_activeinactive,
+    ct_fadeout,
 
     ct_eol = -1
 };
@@ -122,6 +128,9 @@ struct component_t {
         zoom_in_out_t** zoomInOuts;
         cant_move_t** cantMoves;
         play_sound_t** playSounds;
+        object_dispenser_t** objectDispensers;
+        recusrive_game_object_activeinactive_t** recusriveGameObjectActiveinactives;
+        fadeout_t** fadeouts;
 
         // interactions list
         interaction_t** interactions;

@@ -3293,6 +3293,33 @@ void play_sound_t::interact() {
 	source->play();
 }
 
+void object_dispenser_t::interact() {
+	if (itemsAvailable > 0) {
+		pavo_state_t::addItem(itemToDispense);
+		itemsAvailable--;
+		if (deactivateAfterDispensing)
+		{
+			gameObject->setActive(false);
+		}
+	}
+}
+
+void recusrive_game_object_activeinactive_t::interact() {
+	if (this->gameObjectToToggle != SIZE_MAX) {
+		auto gameObjectTT = gameObjects[this->gameObjectToToggle];
+		gameObjectTT->mesh_enabled = false;
+		// TODO: do this correctly
+		gameObjectTT->setActive(false);
+		std::cout << "recusrive_game_object_activeinactive_t is partially implemented" << std::endl;
+	}
+}
+
+void fadeout_t::interact() {
+	// TODO
+	// target->setVolume(targetVolume);
+	target->setEnabled(false);
+}
+
 
 // TODO: manage well known objects in the scene better
 game_object_t* playa;

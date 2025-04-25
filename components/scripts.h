@@ -18,6 +18,9 @@
 #include "interactions/zoom_in_out.h"
 #include "interactions/cant_move.h"
 #include "interactions/play_sound.h"
+#include "interactions/object_dispenser.h"
+#include "interactions/recusrive_game_object_activeinactive.h"
+#include "interactions/fadeout.h"
 
 // scripts
 extern proximity_interactable_t* proximity_interactables[];
