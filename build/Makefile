@@ -23,6 +23,7 @@ OBJS = \
 	../first_level/components.o \
 	../first_level/animations.o \
 	../first_level/cameras.o \
+	../first_level/lights.o \
 	../first_level/audio_sources.o \
 	../first_level/audio_clips.o \
 	../first_level/scripts.o \

@@ -10,6 +10,8 @@ namespace native {
 struct animator_t;
 struct camera_t;
 struct audio_source_t;
+struct directional_light_t;
+struct point_light_t;
 
 // scripts
 struct proximity_interactable_t;
@@ -61,6 +63,8 @@ enum component_type_t {
     ct_animator,
     ct_camera,
     ct_audio_source,
+    ct_directional_light,
+    ct_point_light,
 
     // scripts
     ct_proximity_interactable,
@@ -107,6 +111,8 @@ struct component_t {
         component_base_t** components;
         animator_t** animators;
         audio_source_t** audioSources;
+        directional_light_t** directionalLights;
+        point_light_t** pointLights;
 
         // scripts
         camera_t** cameras;
