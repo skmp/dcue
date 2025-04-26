@@ -15,7 +15,7 @@ struct mouse_look_t {
     inline static bool lookEnabled = true;
     inline static bool rotateEnabled = true;
 
-    static constexpr float rotateSpeed = 45.f / 127;
+    static constexpr float rotateSpeed = 80.f / 127;
 
     static pavo_interactable_t* ii2LookAt;
     static interactable_t* inter;
