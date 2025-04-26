@@ -2124,6 +2124,10 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 		for (auto directional = directional_lights; *directional; directional++)
 		{
 			uniformObject.col[n] = (*directional)->color;
+			uniformObject.col[n].alpha *= (*directional)->intensity;
+			uniformObject.col[n].red *= (*directional)->intensity;
+			uniformObject.col[n].green *= (*directional)->intensity;
+			uniformObject.col[n].blue *= (*directional)->intensity;
 			mat_trans_nodiv_nomod_zerow(
 				-(*directional)->gameObject->ltw.at.x, -(*directional)->gameObject->ltw.at.y, -(*directional)->gameObject->ltw.at.z,
 				uniformObject.dir[n>>2][0][n&3],
@@ -2216,7 +2220,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 
         RGBAf lightDiffuseColors[MAX_LIGHTS];
 
-		float diffuse = 0.3f;
+		float diffuse = 1.f; // should be based on material?
         for (unsigned i = 0; i < cntDiffuse; i++) {
             lightDiffuseColors[i].red = material.red * uniformObject.col[i].red * diffuse;
             lightDiffuseColors[i].green = material.green * uniformObject.col[i].green * diffuse;
