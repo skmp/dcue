@@ -9,7 +9,6 @@ struct directional_light_t {
 
     game_object_t* gameObject;
 
-    V3d direction;
     RGBAf color;
     float intensity;
 };
@@ -19,7 +18,6 @@ struct point_light_t {
 
     game_object_t* gameObject;
 
-    V3d position;
     RGBAf color;
     float intensity;
     float Range;
