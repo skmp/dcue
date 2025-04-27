@@ -22,6 +22,20 @@ namespace native {
         RGBAf color;
         RGBAf emission;
         texture_t* texture;
+
+        bool hasAlpha() {
+            if (color.alpha != 1) {
+                return true;
+            }
+            
+            // Todo: this needs to be exported from unity
+            // if (texture) {
+			// 	auto fmt = (texture->flags >> 27) & 7;
+			// 	return fmt == 0 || fmt == 2;
+			// }
+
+            return false;
+        }
     };
 
     struct mesh_t {

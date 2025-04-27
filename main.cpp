@@ -2007,6 +2007,9 @@ bool hasPointLights = false;
 
 template<int list>
 void renderMesh(camera_t* cam, game_object_t* go) {
+
+	bool isTransp = list != PVR_LIST_OP_POLY;
+
     if (vertexBufferFree() < freeVertexTarget) {
         return;
     }
@@ -2156,7 +2159,9 @@ void renderMesh(camera_t* cam, game_object_t* go) {
     const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
 
     for (size_t submesh_num = 0; submesh_num < go->submesh_count; submesh_num++) {
-
+		if (go->materials[submesh_num]->hasAlpha() != isTransp) {
+			continue;
+		}
         pvr_poly_hdr_t hdr;
         bool textured = go->materials[submesh_num]->texture != nullptr;
 
@@ -4386,10 +4391,17 @@ void renderSelfAndChildren(camera_t* cam, game_object_t* go) {
 		if (mode == 0 && go->materials[0]->color.alpha == 1) {
 			renderQuads(cam, go);
 		}
-		if (mode == 1 && go->materials[0]->color.alpha == 1) {
+		bool hasAnyOpaque = false;
+		bool hasAnyTransp = false;
+		for (int subM = 0; subM < go->submesh_count; subM++) {
+			bool hasAlpha = go->materials[subM]->hasAlpha();
+			hasAnyOpaque |= !hasAlpha;
+			hasAnyTransp |= hasAlpha;
+		}
+		if (mode == 1 && hasAnyOpaque) {
 			renderMesh<PVR_LIST_OP_POLY>(cam, go);
 		}
-		if (mode == 2 && go->materials[0]->color.alpha != 1) {
+		if (mode == 2 && hasAnyTransp) {
 			renderMesh<PVR_LIST_TR_POLY>(cam, go);
 		}
 	}
