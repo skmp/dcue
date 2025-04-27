@@ -1998,6 +1998,8 @@ static float zBuffer[32][32];
 unsigned total_idx;
 #endif
 
+bool hasPointLights = false;
+
 template<int list>
 void renderMesh(camera_t* cam, game_object_t* go) {
     if (vertexBufferFree() < freeVertexTarget) {
@@ -2345,7 +2347,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 }
             }
 
-			{
+			if (hasPointLights) {
 				unsigned normalOffset = (selector & 8) ? (3 * 2) : (3 * 4);
                 if (selector & 16) {
                     normalOffset += 1 * 2;
