@@ -1057,6 +1057,52 @@ __attribute__ ((noinline)) void tnlMeshletVertexColor(uint8_t* dstCol, const int
 }
 #endif
 
+__attribute__ ((noinline)) void tnlMeshletVertexColorBaked(uint8_t* dstCol, const int8_t* colData, uint32_t vertexCount) {
+	const int8_t* next_vertex = colData;
+	// should be already in cache
+	// dcache_pref_block(next_vertex);
+
+	auto vertex = next_vertex;
+	next_vertex += 3;
+	float cB = *vertex++;
+	float cG = *vertex++;
+	float cR = *vertex++;
+	float cA;
+
+	vertexCount--;
+
+	dstCol += 4 * sizeof(float);
+	do {
+		vertex = next_vertex;
+		// should be alraedy in cache
+		// dcache_pref_block(vertex + 32);
+
+		next_vertex += 3;
+
+		float* cols = (float*)dstCol;
+		
+		mat_trans_nodiv_nomod(cB, cG, cR, cB, cG, cR, cA);
+
+		*--cols = cB;
+		cB = *vertex++;
+		*--cols = cG;
+		cG = *vertex++;
+		*--cols = cR;
+		cR = *vertex++;
+		*--cols = cA;
+		
+		dstCol += 64;
+	} while(--vertexCount != 0);
+
+	float* cols = (float*)dstCol;
+
+	mat_trans_nodiv_nomod(cB, cG, cR, cB, cG, cR, cA);
+
+	*--cols = cB;
+	*--cols = cG;
+	*--cols = cR;
+	*--cols = cA;
+}
 
 template <unsigned cntDiffuse, bool floatNormals>
 __attribute__ ((noinline)) void tnlMeshletDiffuseColor(uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const RGBAf *lights) {
@@ -1228,6 +1274,111 @@ __attribute__ ((noinline)) void tnlMeshletPointColor(uint8_t* srcPos, uint8_t* d
 
 		srcPos += vertexSize;
 		dstCol += 64;
+	} while(--vertexCount != 0);
+}
+
+template <bool small_xyz, bool floatNormals>
+__attribute__ ((noinline)) void tnlMeshletPointColorBake(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t* light, matrix_t* ltwd, matrix_t* normalmtx) {
+	
+	const uint8_t* next_vertex = normalData;
+	dcache_pref_block(next_vertex);
+
+	V3d lightPos = light->gameObject->ltw.pos;
+
+	const float lightR = light->color.red * light->intensity;
+	const float lightG = light->color.green * light->intensity;
+	const float lightB = light->color.blue * light->intensity;
+
+	const float r2 = light->Range*light->Range;
+
+	do {
+		auto vertex = next_vertex;
+		dcache_pref_block(vertex + 32);
+		next_vertex += vertexSize;
+
+		const int8_t* inxyz = (const int8_t*)vertex;
+
+
+		float x, y, z, w;
+
+		mat_load(ltwd);
+		if (!small_xyz) {
+			auto stripVert = reinterpret_cast<const V3d *>(srcPos);
+
+			mat_trans_nodiv_nomod(stripVert->x, stripVert->y, stripVert->z, x, y, z, w);
+
+		} else {
+			auto stripVert = reinterpret_cast<const int16_t *>(srcPos);
+
+			mat_trans_nodiv_nomod((float)stripVert[0], (float)stripVert[1], (float)stripVert[2], 
+								x, y, z, w);
+		}
+
+		const V3d pos = { x, y, z };
+
+		(void)w;
+
+		V3d toL = sub(lightPos, pos);
+
+		V3d normal;
+		if (!floatNormals) {
+			normal = { static_cast<float>(inxyz[0])/127, static_cast<float>(inxyz[1])/127, static_cast<float>(inxyz[2])/127};
+		} else {
+			normal = *(V3d*)inxyz;
+		}
+
+		mat_load(normalmtx);
+
+		mat_trans_nodiv_nomod_zerow(normal.x, normal.y, normal.z, x, y, z, w);
+
+		normal = { x, y, z};
+		normal = normalize(normal);
+		(void)w;
+
+		#if defined(DC_SH4)
+		float d2 = fipr_magnitude_sqr(toL.x, toL.y, toL.z, 0);
+		#else
+		float d2 = toL.x * toL.x + toL.y * toL.y + toL.z * toL.z;
+		#endif
+
+		toL = normalize(toL);
+
+		#if defined(DC_SH4)
+		float rawNdotL = fipr(normal.x, normal.y, normal.z, 0, toL.x, toL.y, toL.z, 0);
+		#else
+		float rawNdotL = normal.x * toL.x + normal.y * toL.y + normal.z * toL.z;
+		#endif
+		float invLen = 1.0f/sqrtf(d2);
+		
+		float lightAmt = rawNdotL;
+		// float att = invLen * invLen;
+		float att = 1.0f / (1.0f + 25.0f * (d2 / r2));
+		lightAmt *= att / length(normal);
+
+		if (lightAmt > 0.0001f) {
+
+			float dR = lightAmt * lightR;
+			float dG = lightAmt * lightG;
+			float dB = lightAmt * lightB;
+
+			uint8_t* cols = dstCol;
+
+			#define COLADD(dC) do { \
+				uint32_t dc = *cols; \
+				dc += dC * 255; \
+				if (dc > 255) dc = 255; \
+				*cols = dc; \
+			} while(false)
+			
+			COLADD(dB); cols++;
+			COLADD(dG); cols++;
+			COLADD(dR);
+
+			#undef COLADD
+		}
+
+		srcPos += vertexSize;
+		dstCol += 3;
 	} while(--vertexCount != 0);
 }
 
@@ -1914,6 +2065,10 @@ static constexpr void (*tnlMeshletVertexColorSelector[1])(uint8_t* dstCol, const
 	&tnlMeshletVertexColor,
 };
 
+static constexpr void (*tnlMeshletVertexColorBakedSelector[1])(uint8_t* dstCol, const int8_t* colData, uint32_t vertexCount) = {
+	&tnlMeshletVertexColorBaked,
+};
+
 //tnlMeshletDiffuseColor
 static constexpr void (*tnlMeshletDiffuseColorSelector[8])(uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const RGBAf *lights) = {
 	&tnlMeshletDiffuseColor<1, false>,
@@ -1930,6 +2085,11 @@ static constexpr void (*tnlMeshletDiffuseColorSelector[8])(uint8_t* dstCol, cons
 static constexpr void (*tnlMeshletPointColorSelector[8])(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t *light, float det, matrix_t* ltwd, matrix_t* normalmtx, material_t* material) = {
 	&tnlMeshletPointColor<false, false>,
 	&tnlMeshletPointColor<true, false>,
+};
+
+static constexpr void (*tnlMeshletPointColorBakeSelector[8])(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t *light, matrix_t* ltwd, matrix_t* normalmtx) = {
+	&tnlMeshletPointColorBake<false, false>,
+	&tnlMeshletPointColorBake<true, false>,
 };
 
 static void (*submitMeshletSelector[2])(uint8_t* OCR, const int8_t* indexData, uint32_t indexCount) = {
@@ -1953,7 +2113,7 @@ static void (*clipAndsubmitMeshletSelectorFallback[2])(uint8_t* OCR, const int8_
 };
 
 RGBAf ambLight = { 0.7f, 0.7f, 0.7f, 1.0f };
-float ambient = 0.4f;
+float ambient = 0.2f;
 
 size_t vertexBufferFree() {
     size_t end   = PVR_GET(PVR_TA_VERTBUF_END);
@@ -2134,12 +2294,10 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 		for (auto directional = directional_lights; *directional; directional++)
 		{
 			uniformObject.col[n] = (*directional)->color;
-			if (hasPointLights) {
-				uniformObject.col[n].alpha *= (*directional)->intensity;
-				uniformObject.col[n].red *= (*directional)->intensity;
-				uniformObject.col[n].green *= (*directional)->intensity;
-				uniformObject.col[n].blue *= (*directional)->intensity;
-			}
+			uniformObject.col[n].alpha *= (*directional)->intensity;
+			uniformObject.col[n].red *= (*directional)->intensity;
+			uniformObject.col[n].green *= (*directional)->intensity;
+			uniformObject.col[n].blue *= (*directional)->intensity;
 			mat_trans_nodiv_nomod_zerow(
 				-(*directional)->gameObject->ltw.at.x, -(*directional)->gameObject->ltw.at.y, -(*directional)->gameObject->ltw.at.z,
 				uniformObject.dir[n>>2][0][n&3],
@@ -2157,6 +2315,8 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 	}
 
     const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
+
+	size_t colorsSize = 0;
 
     for (size_t submesh_num = 0; submesh_num < go->submesh_count; submesh_num++) {
 		if (go->materials[submesh_num]->hasAlpha() != isTransp) {
@@ -2252,6 +2412,9 @@ void renderMesh(camera_t* cam, game_object_t* go) {
             auto meshlet = (const MeshletInfo*)meshletInfoBytes;
             meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
 
+			auto colorsBase = colorsSize;
+			colorsSize += meshlet->vertexCount * 3;
+
 			#if defined(DC_SIM)
 			total_idx += meshlet->indexCount;
 			#endif
@@ -2327,7 +2490,13 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 dce_set_mat_vertex_color(&residual, &material);
                 mat_load(&DCE_MESHLET_MAT_VERTEX_COLOR);
                 tnlMeshletVertexColorSelector[0](OCR_SPACE + dstColOffset, (int8_t*)&go->mesh->data[meshlet->vertexOffset] + colOffset, meshlet->vertexCount, meshlet->vertexSize);
-            } else {
+            } else if (go->bakedColors && !hasPointLights) {
+				// colorsBase
+				unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
+                dce_set_mat_vertex_color(&residual, &material);
+                mat_load(&DCE_MESHLET_MAT_VERTEX_COLOR);
+                tnlMeshletVertexColorBakedSelector[0](OCR_SPACE + dstColOffset, &go->bakedColors[colorsBase], meshlet->vertexCount);
+			} else {
                 unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
                 tnlMeshletFillResidualSelector[0](OCR_SPACE + dstColOffset, meshlet->vertexCount, &residual);
             }
@@ -4556,6 +4725,94 @@ static void render_skybox(camera_t* camera) {
     }
 }
 
+void bakeLights() {
+	for (auto gameObject: gameObjects) {
+		if (!gameObject->mesh || !gameObject->materials) {
+			continue;
+		}
+
+		// bakedColors
+		const MeshInfo* meshInfo = (const MeshInfo*)&gameObject->mesh->data[0];
+		uint8_t* colors = nullptr;
+		size_t colorsSize = 0;
+
+		for (size_t submesh_num = 0; submesh_num < (gameObject->submesh_count /*+ gameObject->logical_submesh*/); submesh_num++) {
+			if (!gameObject->materials[submesh_num]) {
+				// huh?
+				break;
+			}
+			auto meshletInfoBytes = &gameObject->mesh->data[meshInfo[submesh_num].meshletOffset];
+			bool textured = gameObject->materials[submesh_num]->texture != nullptr;
+			
+			for (int16_t meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
+				auto meshlet = (const MeshletInfo*)meshletInfoBytes;
+				meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
+				
+				Sphere sphere = meshlet->boundingSphere;
+				mat_load((matrix_t*)&gameObject->ltw);
+				float w;
+				mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, sphere.center.x, sphere.center.y, sphere.center.z, w);
+				(void)w;
+				sphere.radius *= gameObject->maxWorldScale;
+				
+				unsigned selector = meshlet->flags;
+
+				dce_set_mat_decode(
+					meshlet->boundingSphere.radius / 32767.0f,
+					meshlet->boundingSphere.center.x,
+					meshlet->boundingSphere.center.y,
+					meshlet->boundingSphere.center.z
+				);
+				auto colorsBase = colorsSize;
+				colorsSize += meshlet->vertexCount * 3;
+				colors = (uint8_t*)realloc(colors, colorsSize);
+				memset(&colors[colorsBase], 0, meshlet->vertexCount * 3);
+
+				{
+					unsigned normalOffset = (selector & 8) ? (3 * 2) : (3 * 4);
+					if (selector & 16) {
+						normalOffset += 1 * 2;
+					}
+
+					normalOffset += (selector & 32) ? 2 : 4;
+
+					auto normalPointer = &gameObject->mesh->data[meshlet->vertexOffset] + normalOffset;
+					auto vtxSize = meshlet->vertexSize;
+
+					unsigned smallSelector = ((selector & 8) ? 1 : 0);
+
+					mat_load((matrix_t*)&gameObject->ltw);
+					if (selector & 8) {
+						// mat_load(&mtx);
+						mat_apply(&DCE_MESHLET_MAT_DECODE);
+					} else {
+						// mat_load(&mtx);
+					}
+
+					matrix_t mtx;
+					mat_store(&mtx);
+
+					for (auto point = point_lights; *point; point++) {
+						/*if ((*point)->gameObject->isActive())*/ {
+							float dist = length(sub((*point)->gameObject->ltw.pos, sphere.center));
+							float maxDist = sphere.radius + (*point)->Range;
+							if (dist < maxDist) {
+								tnlMeshletPointColorBakeSelector[smallSelector](&gameObject->mesh->data[meshlet->vertexOffset], &colors[colorsBase], normalPointer, meshlet->vertexCount, vtxSize, *point, &mtx, (matrix_t*)&gameObject->ltw);
+							}
+						}
+					}
+				}
+			}
+		}
+	
+		gameObject->bakedColors = (int8_t*)colors;
+
+		for (size_t i = 0; i < colorsSize; i++) {
+			gameObject->bakedColors[i] = gameObject->bakedColors[i] ^ 128;
+		}
+	}
+}
+
 int main(int argc, const char** argv) {
 
     if (pvr_params.fsaa_enabled) {
@@ -4590,6 +4847,7 @@ int main(int argc, const char** argv) {
 	InitializeFlowMachines();
 	InitializeAudioClips();
 	InitializeAudioSources();
+
 
     unsigned currentStamp = 0;
 
@@ -4641,6 +4899,8 @@ int main(int argc, const char** argv) {
 	// initial positions
 	positionUpdate();
 	physicsUpdate(0.01);
+
+	bakeLights();
 
 	for (auto go: gameObjects) {
 		if (go->isActive()) {

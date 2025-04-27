@@ -72,23 +72,28 @@ inline V3d lerp(const V3d &a, const V3d &b, float r) {
 // RGBA
 struct RGBA
 {
-	uint8_t red;
-	uint8_t green;
-	uint8_t blue;
-	uint8_t alpha;
+	union {
+		struct {
+			uint8_t blue;
+			uint8_t green;
+			uint8_t red;
+			uint8_t alpha;
+		};
+		uint32_t raw;
+	};
 };
-inline RGBA makeRGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) { RGBA c = { r, g, b, a }; return c; }
+inline RGBA makeRGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) { RGBA c = { b, g, r, a }; return c; }
 inline bool equal(const RGBA &c1, const RGBA &c2) { return c1.red == c2.red && c1.green == c2.green && c1.blue == c2.blue && c1.alpha == c2.alpha; }
 #define RWRGBAINT(r, g, b, a) ((uint32)((((a)&0xff)<<24)|(((b)&0xff)<<16)|(((g)&0xff)<<8)|((r)&0xff)))
 
 struct RGBAf
 {
+	float alpha;
 	float red;
 	float green;
 	float blue;
-	float alpha;
 };
-inline RGBAf makeRGBAf(float r, float g, float b, float a) { RGBAf c = { r, g, b, a }; return c; }
+inline RGBAf makeRGBAf(float r, float g, float b, float a) { RGBAf c = { a, r, g, b }; return c; }
 inline bool equal(const RGBAf &c1, const RGBAf &c2) { return c1.red == c2.red && c1.green == c2.green && c1.blue == c2.blue && c1.alpha == c2.alpha; }
 inline RGBAf add(const RGBAf &a, const RGBAf &b) { return makeRGBAf(a.red+b.red, a.green+b.green, a.blue+b.blue, a.alpha+b.alpha); }
 inline RGBAf modulate(const RGBAf &a, const RGBAf &b) { return makeRGBAf(a.red*b.red, a.green*b.green, a.blue*b.blue, a.alpha*b.alpha); }
