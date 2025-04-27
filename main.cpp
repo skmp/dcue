@@ -1948,7 +1948,7 @@ static void (*clipAndsubmitMeshletSelectorFallback[2])(uint8_t* OCR, const int8_
 };
 
 RGBAf ambLight = { 0.7f, 0.7f, 0.7f, 1.0f };
-float ambient = 0.2f;
+float ambient = 0.4f;
 
 size_t vertexBufferFree() {
     size_t end   = PVR_GET(PVR_TA_VERTBUF_END);
@@ -2126,10 +2126,12 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 		for (auto directional = directional_lights; *directional; directional++)
 		{
 			uniformObject.col[n] = (*directional)->color;
+			if (hasPointLights) {
 			uniformObject.col[n].alpha *= (*directional)->intensity;
 			uniformObject.col[n].red *= (*directional)->intensity;
 			uniformObject.col[n].green *= (*directional)->intensity;
 			uniformObject.col[n].blue *= (*directional)->intensity;
+			}
 			mat_trans_nodiv_nomod_zerow(
 				-(*directional)->gameObject->ltw.at.x, -(*directional)->gameObject->ltw.at.y, -(*directional)->gameObject->ltw.at.z,
 				uniformObject.dir[n>>2][0][n&3],
@@ -4931,12 +4933,12 @@ int main(int argc, const char** argv) {
 				auto state = (cont_state_t *)maple_dev_status(contMaple);
 				if (state) {
 					static bool old_down = !state->dpad_down;
-					if (!old_down && state->dpad_down && choice_current > 0) {
+					if (!old_down && state->dpad_down && choice_current < (choices_count-1)) {
 						choice_current++;
 					}
 					old_down = state->dpad_down;
 					static bool old_up = !state->dpad_up;
-					if (!old_up && state->dpad_up && choice_current < (choices_count-1)) {
+					if (!old_up && state->dpad_up && choice_current > 0) {
 						choice_current--;
 					}
 					old_up = state->dpad_up;
