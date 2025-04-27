@@ -625,7 +625,7 @@ void loadDreamScene(const char *scene) {
     // Read and verify header (8 bytes)
     char header[8];
     in.read(header, 8);
-    if (std::string(header, 8) != "DCUE0004") {
+    if (std::string(header, 8) != "DCUE0005") {
         printf("Invalid file header\n");
         exit(1);
     }
@@ -659,6 +659,12 @@ void loadDreamScene(const char *scene) {
         in.read(reinterpret_cast<char*>(&g), sizeof(float));
         in.read(reinterpret_cast<char*>(&b), sizeof(float));
 
+		float ea, er, eg, eb;
+		in.read(reinterpret_cast<char*>(&ea), sizeof(float));
+        in.read(reinterpret_cast<char*>(&er), sizeof(float));
+        in.read(reinterpret_cast<char*>(&eg), sizeof(float));
+        in.read(reinterpret_cast<char*>(&eb), sizeof(float));
+
         // Read hasTexture flag (bool stored as one byte)
         char hasTextureChar = 0;
         in.read(&hasTextureChar, 1);
@@ -670,7 +676,7 @@ void loadDreamScene(const char *scene) {
             if (texIndex >= 0 && texIndex < static_cast<int>(textures.size()))
                 tex = textures[texIndex];
         }
-        material_t* mat = new material_t(a, r, g, b, tex);
+        material_t* mat = new material_t(a, r, g, b, ea, er, eg, eb, tex);
         materials.push_back(mat);
     }
 
@@ -1245,8 +1251,8 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 		for (size_t i = 0; i < submesh->index_count; i++) {
 			submesh->indices[i] = canonicalIdx[submesh->indices[i]];
 		}
-
-		if (false && submesh->index_count > 1500)
+#if 0
+		if (submesh->index_count > 1500)
 		{
 			float target_error = 0.1f;
 			float threshold = 1500.0f/submesh->index_count;
@@ -1291,6 +1297,7 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 
 			texconvf("Submesh %u: %zu→%zu indices (error=%f)\n", submeshNum, ic, new_ic, lod_error);
 		}
+		#endif
 		{
 			indices Indices(submesh->indices, submesh->indices + submesh->index_count);
 
@@ -1743,7 +1750,7 @@ int main(int argc, const char** argv) {
 
 	auto outfile = std::ofstream(argv[2]);
 
-    outfile.write("DCUENS03", 8);
+    outfile.write("DCUENS04", 8);
     
 	uint32_t tmp;
 
@@ -1769,6 +1776,10 @@ int main(int argc, const char** argv) {
 		outfile.write((char*)&material->r, sizeof(material->r));
 		outfile.write((char*)&material->g, sizeof(material->g));
 		outfile.write((char*)&material->b, sizeof(material->b));
+		outfile.write((char*)&material->ea, sizeof(material->ea));
+		outfile.write((char*)&material->er, sizeof(material->er));
+		outfile.write((char*)&material->eg, sizeof(material->eg));
+		outfile.write((char*)&material->eb, sizeof(material->eb));
 		if (material->texture) {
 			tmp = native_textures_index[material->texture];
 		} else {

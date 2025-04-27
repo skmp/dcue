@@ -24,13 +24,18 @@ namespace import {
 
     struct material_t {
         float a, r, g, b;
+        float ea, er, eg, eb;
         texture_t* texture;
-        material_t(float a, float r, float g, float b, texture_t* texture)
+        material_t(float a, float r, float g, float b, float ea, float er, float eg, float eb, texture_t* texture)
         {
             this->a = a;
             this->r = r;
             this->g = g;
             this->b = b;
+            this->ea = ea;
+            this->er = er;
+            this->eg = eg;
+            this->eb = eb;
             this->texture = texture;
         }
     };

@@ -20,6 +20,7 @@ namespace native {
 
     struct material_t {
         RGBAf color;
+        RGBAf emission;
         texture_t* texture;
     };
 

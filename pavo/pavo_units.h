@@ -66,13 +66,13 @@ struct pavo_unit_wait_for_interaction_t: pavo_unit_t {
     }
 
     pavo_unit_wait_for_interaction_t(pavo_unit_t* onInteract, pavo_unit_t* onFocus, pavo_interactable_t* interactable, const char* lookAtText, float interactionRadius): onInteract(onInteract), onFocus(onFocus), interactable(interactable), lookAtText(lookAtText) {
-        if (onInteract) {
+        if (onInteract != &pavo_unit_null_0) {
             actions.onInteract = [this](pavo_interactable_t*) { 
                 pavo_state_t::pushEnv({.canMove = false, .canRotate = false, .onInteraction = noopInteraction}, &this->interactable->oldEnv);
                 return this->onInteract->enter();
             };
         }
-        if (onFocus) {
+        if (onFocus != &pavo_unit_null_0) {
             actions.onFocus = [this](pavo_interactable_t*) {
                 pavo_state_t::pushEnv({.canMove = false, .canRotate = false, .onInteraction = noopInteraction}, &this->interactable->oldEnv);
                 return this->onFocus->enter();

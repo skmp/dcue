@@ -291,7 +291,7 @@ bool loadScene(const char* scene) {
     // Read and verify header (8 bytes)
     char header[9] = { 0};
     in.read(header, 8);
-    if (strncmp(header, "DCUENS03", 8) != 0) {
+    if (strncmp(header, "DCUENS04", 8) != 0) {
         std::cout << "Invalid file header: " << header << std::endl;
         return false;
     }
@@ -323,6 +323,11 @@ bool loadScene(const char* scene) {
 		in.read((char*)&material->color.red, sizeof(material->color.red));
 		in.read((char*)&material->color.green, sizeof(material->color.green));
 		in.read((char*)&material->color.blue, sizeof(material->color.blue));
+
+		in.read((char*)&material->emission.alpha, sizeof(material->emission.alpha));
+		in.read((char*)&material->emission.red, sizeof(material->emission.red));
+		in.read((char*)&material->emission.green, sizeof(material->emission.green));
+		in.read((char*)&material->emission.blue, sizeof(material->emission.blue));
         
         in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp));
         if (tmp != UINT32_MAX) {
@@ -2127,10 +2132,10 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 		{
 			uniformObject.col[n] = (*directional)->color;
 			if (hasPointLights) {
-			uniformObject.col[n].alpha *= (*directional)->intensity;
-			uniformObject.col[n].red *= (*directional)->intensity;
-			uniformObject.col[n].green *= (*directional)->intensity;
-			uniformObject.col[n].blue *= (*directional)->intensity;
+				uniformObject.col[n].alpha *= (*directional)->intensity;
+				uniformObject.col[n].red *= (*directional)->intensity;
+				uniformObject.col[n].green *= (*directional)->intensity;
+				uniformObject.col[n].blue *= (*directional)->intensity;
 			}
 			mat_trans_nodiv_nomod_zerow(
 				-(*directional)->gameObject->ltw.at.x, -(*directional)->gameObject->ltw.at.y, -(*directional)->gameObject->ltw.at.z,
@@ -2202,9 +2207,9 @@ void renderMesh(camera_t* cam, game_object_t* go) {
         RGBAf residual, material;
         // Ambient Alpha ALWAYS = 1.0
         residual.alpha = go->materials[submesh_num]->color.alpha;
-        residual.red = ambLight.red * ambient * go->materials[submesh_num]->color.red;
-        residual.green = ambLight.green * ambient * go->materials[submesh_num]->color.green;
-        residual.blue = ambLight.blue * ambient * go->materials[submesh_num]->color.blue;
+        residual.red = ambLight.red * ambient * go->materials[submesh_num]->color.red + go->materials[submesh_num]->emission.red;
+        residual.green = ambLight.green * ambient * go->materials[submesh_num]->color.green + go->materials[submesh_num]->emission.green;
+        residual.blue = ambLight.blue * ambient * go->materials[submesh_num]->color.blue +  + go->materials[submesh_num]->emission.blue;
         material.alpha = go->materials[submesh_num]->color.alpha;
         material.red = (1.0f / 255.0f) * go->materials[submesh_num]->color.red;
         material.green = (1.0f / 255.0f) * go->materials[submesh_num]->color.green;
