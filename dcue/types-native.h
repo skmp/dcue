@@ -132,7 +132,7 @@ namespace native {
         bool compoundVisible;
 
         mesh_t* mesh;
-        int8_t* bakedColors;
+        int8_t** bakedColors;
         material_t** materials;
         size_t submesh_count;
         int logical_submesh = -1;

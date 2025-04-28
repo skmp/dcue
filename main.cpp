@@ -2316,8 +2316,6 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 
     const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
 
-	size_t colorsSize = 0;
-
     for (size_t submesh_num = 0; submesh_num < go->submesh_count; submesh_num++) {
 		if (go->materials[submesh_num]->hasAlpha() != isTransp) {
 			continue;
@@ -2408,6 +2406,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 
         auto meshletInfoBytes = &go->mesh->data[meshInfo[effectiveSubmeshNum].meshletOffset];
         
+		size_t colorsSize = 0;
         for (int16_t meshletNum = 0; meshletNum < meshInfo[effectiveSubmeshNum].meshletCount; meshletNum++) {
             auto meshlet = (const MeshletInfo*)meshletInfoBytes;
             meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
@@ -2495,7 +2494,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 				unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
                 dce_set_mat_vertex_color(&residual, &material);
                 mat_load(&DCE_MESHLET_MAT_VERTEX_COLOR);
-                tnlMeshletVertexColorBakedSelector[0](OCR_SPACE + dstColOffset, &go->bakedColors[colorsBase], meshlet->vertexCount);
+                tnlMeshletVertexColorBakedSelector[0](OCR_SPACE + dstColOffset, &go->bakedColors[submesh_num][colorsBase], meshlet->vertexCount);
 			} else {
                 unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
                 tnlMeshletFillResidualSelector[0](OCR_SPACE + dstColOffset, meshlet->vertexCount, &residual);
@@ -4734,6 +4733,7 @@ void bakeLights() {
 		// bakedColors
 		const MeshInfo* meshInfo = (const MeshInfo*)&gameObject->mesh->data[0];
 		uint8_t* colors = nullptr;
+		std::vector<size_t> submesh_colors;
 		size_t colorsSize = 0;
 
 		for (size_t submesh_num = 0; submesh_num < (gameObject->submesh_count /*+ gameObject->logical_submesh*/); submesh_num++) {
@@ -4744,6 +4744,7 @@ void bakeLights() {
 			auto meshletInfoBytes = &gameObject->mesh->data[meshInfo[submesh_num].meshletOffset];
 			bool textured = gameObject->materials[submesh_num]->texture != nullptr;
 			
+			submesh_colors.push_back(colorsSize);
 			for (int16_t meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
 				auto meshlet = (const MeshletInfo*)meshletInfoBytes;
 				meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
@@ -4805,10 +4806,13 @@ void bakeLights() {
 			}
 		}
 	
-		gameObject->bakedColors = (int8_t*)colors;
-
+		gameObject->bakedColors =(int8_t**)malloc(submesh_colors.size()*sizeof(int8_t*));
+		for (size_t i = 0; i < submesh_colors.size(); i++) {
+			gameObject->bakedColors[i] = (int8_t*)colors + submesh_colors[i];
+		}
+		
 		for (size_t i = 0; i < colorsSize; i++) {
-			gameObject->bakedColors[i] = gameObject->bakedColors[i] ^ 128;
+			colors[i] = colors[i] ^ 128;
 		}
 	}
 }
