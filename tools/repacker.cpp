@@ -57,6 +57,7 @@ struct Triangle {
 
 struct Quad {
     int i0, i1, i2, i3;
+	unsigned submesh;
 };
 
 // An edge defined by two vertex indices (stored in sorted order)
@@ -553,9 +554,13 @@ QuadMesh GenerateConservativeQuads(const mesh_t* mesh) {
     
     if (true /*result.vertices.size() > 32*/) {
         std::vector<Quad> allQuads;
-        for (const auto &sub : result.quadsPerSubmesh) {
-            for (const auto &q : sub)
+		// submesh
+        for (unsigned i = 0; i < result.quadsPerSubmesh.size(); i++) {
+			const auto &sub = result.quadsPerSubmesh[i];
+            for (const auto &q : sub) {
                 allQuads.push_back(q);
+				allQuads.back().submesh = i;
+			}
         }
         std::sort(allQuads.begin(), allQuads.end(), [&](const Quad &a, const Quad &b) {
              return QuadArea(a, result.vertices) > QuadArea(b, result.vertices);
@@ -1547,7 +1552,10 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 	auto quadDescSize = qm.quadsPerSubmesh.size() * 2 * 2;
 	auto quadIndexSize = 0;
 	for (auto& quads: qm.quadsPerSubmesh) {
-		quadIndexSize += quads.size() * 4 * 2;
+		quadIndexSize += quads.size() * 5 * 2;
+	}
+	if (quadIndexSize & 3) {
+		quadIndexSize += 2;
 	}
 
 	auto quadVertexOffset = quadIndexSize + quadDescSize;
@@ -1581,7 +1589,13 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 			quadDataIndex.write<int16_t>(offset1);
 			quadDataIndex.write<int16_t>(offset2);
 			quadDataIndex.write<int16_t>(offset3);
+
+			assert(quad.submesh <= INT16_MAX);
+			quadDataIndex.write<int16_t>(quad.submesh);
 		}
+	}
+	if (quadDataIndex.size() & 3) {
+		quadDataIndex.write<int16_t>(0); // padding
 	}
 
 	for (auto& vtx: qm.vertices) {
@@ -1597,8 +1611,8 @@ compressed_mesh_t process_mesh(mesh_t *mesh) {
 
 	std::vector<uint8_t> quadData(quadDataDesc.size() + quadDataIndex.size() + quadDataVertex.size());
 	memcpy(quadData.data(), quadDataDesc.data(), quadDataDesc.size());
-	memcpy(quadData.data() + quadDataDesc.size(), quadDataIndex.data(), quadDataIndex.size());
-	memcpy(quadData.data() + quadDataDesc.size() + quadDataIndex.size(), quadDataVertex.data(), quadDataVertex.size());
+	memcpy(quadData.data() + quadDataDesc.size(), quadDataVertex.data(), quadDataVertex.size());
+	memcpy(quadData.data() + quadDataDesc.size() + quadDataVertex.size(), quadDataIndex.data(), quadDataIndex.size());
 	texconvf("Quad Data Size: %lu\n", quadData.size());
     return { boundingSphere, quadData, meshlets };
 }
@@ -1715,7 +1729,7 @@ int main(int argc, const char** argv) {
             auto compressed_mesh = process_mesh(mesh);
             auto mesh_file = std::ofstream(mesh_filename);
 
-            mesh_file.write("DCUENM01", 8);
+            mesh_file.write("DCUENM02", 8);
             mesh_file.write((const char*)&compressed_mesh.bounding_sphere, sizeof(compressed_mesh.bounding_sphere));
 			uint32_t tmp = compressed_mesh.quadData.size();
 			mesh_file.write((const char*)&tmp, sizeof(tmp));
@@ -1727,7 +1741,7 @@ int main(int argc, const char** argv) {
 			auto mesh_file = std::ifstream(mesh_filename);
 			char tag[9] = { 0 };
 			mesh_file.read(tag, 8);
-			if (memcmp(tag, "DCUENM01", 8) != 0) {
+			if (memcmp(tag, "DCUENM02", 8) != 0) {
 				std::cout << "Unexpeted mesh tag " << tag << std::endl;
 				return 1;
 			}

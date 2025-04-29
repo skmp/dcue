@@ -2952,7 +2952,7 @@ void renderQuads(camera_t* cam, game_object_t* go) {
 		
 		// std::cout << "quads: " << quadOffset << " num " << quadCount << " verts " << (int)vtxCount << std::endl;
 
-		V3d* srcVtx = (V3d*)(quadOffset + quadCount * 8 + go->mesh->quadData);
+		V3d* srcVtx = (V3d*)(quadOffset + go->mesh->quadData);
 		V3d* dstVtx = (V3d*)OCR_SPACE;
 		// float *zBuffer = (float*)(OCR_SPACE + (32 * 12));
 		
@@ -2974,18 +2974,20 @@ void renderQuads(camera_t* cam, game_object_t* go) {
 			dstVtx++;
 		} while(--vtxCount);
 		
-		int16_t* quadIndex = (int16_t*)(go->mesh->quadData + quadOffset);
+		int16_t* quadIndex = (int16_t*)(go->mesh->quadData + quadOffset + go->mesh->quadData[3] * 3 * 4);
 		uint8_t* transVtx = OCR_SPACE;
 		int16_t cIndex;
 
-		for (size_t quadIdx = 0; quadIdx < quadCount*4; quadIdx+=4) {
+		for (size_t quadIdx = 0; quadIdx < quadCount*5; quadIdx+=5) {
 			// submit quad
 			
 			const V3d* cVtx0 = (V3d*)(transVtx+quadIndex[quadIdx + 0]);
 			const V3d* cVtx1 = (V3d*)(transVtx+quadIndex[quadIdx + 1]);
 			const V3d* cVtx2 = (V3d*)(transVtx+quadIndex[quadIdx + 2]);
 			const V3d* cVtx3 = (V3d*)(transVtx+quadIndex[quadIdx + 3]);
-
+			if (go->materials[quadIndex[quadIdx + 4]]->mode != 0) {
+				continue;
+			}
 			if (cVtx0->z <= 0) continue;
 			if (cVtx1->z <= 0) continue;
 			if (cVtx2->z <= 0) continue;
