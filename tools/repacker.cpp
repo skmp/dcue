@@ -625,7 +625,7 @@ void loadDreamScene(const char *scene) {
     // Read and verify header (8 bytes)
     char header[8];
     in.read(header, 8);
-    if (std::string(header, 8) != "DCUE0005") {
+    if (std::string(header, 8) != "DCUE0006") {
         printf("Invalid file header\n");
         exit(1);
     }
@@ -653,6 +653,9 @@ void loadDreamScene(const char *scene) {
     int materialCount = 0;
     in.read(reinterpret_cast<char*>(&materialCount), sizeof(int));
     for (int i = 0; i < materialCount; i++) {
+		uint8_t mode;
+		in.read(reinterpret_cast<char*>(&mode), sizeof(mode));
+
         float a, r, g, b;
         in.read(reinterpret_cast<char*>(&a), sizeof(float));
         in.read(reinterpret_cast<char*>(&r), sizeof(float));
@@ -676,7 +679,7 @@ void loadDreamScene(const char *scene) {
             if (texIndex >= 0 && texIndex < static_cast<int>(textures.size()))
                 tex = textures[texIndex];
         }
-        material_t* mat = new material_t(a, r, g, b, ea, er, eg, eb, tex);
+        material_t* mat = new material_t(mode, a, r, g, b, ea, er, eg, eb, tex);
         materials.push_back(mat);
     }
 
@@ -773,6 +776,10 @@ void loadDreamScene(const char *scene) {
         char activeChar = 0;
         in.read(&activeChar, 1);
         bool active = (activeChar != 0);
+
+		char movableChar = 0;
+        in.read(&movableChar, 1);
+        bool movable = (movableChar != 0);
 
         // Transform matrix (16 floats)
         matrix_t* transform = new matrix_t();
@@ -916,7 +923,7 @@ void loadDreamScene(const char *scene) {
 			meshEnabled = true; // TODO: Fixme
 		}
 
-        game_object_t* go = new game_object_t(active, transform, meshEnabled, mesh, materials_lst);
+        game_object_t* go = new game_object_t(active, movable, transform, meshEnabled, mesh, materials_lst);
         gameObjects.push_back(go);
     }
 
@@ -1750,7 +1757,7 @@ int main(int argc, const char** argv) {
 
 	auto outfile = std::ofstream(argv[2]);
 
-    outfile.write("DCUENS04", 8);
+    outfile.write("DCUENS05", 8);
     
 	uint32_t tmp;
 
@@ -1772,6 +1779,7 @@ int main(int argc, const char** argv) {
 	tmp = (uint32_t)materials.size();
 	outfile.write((char*)&tmp, sizeof(tmp));
 	for (auto& material: materials) {
+		outfile.write((char*)&material->mode, sizeof(material->mode));
 		outfile.write((char*)&material->a, sizeof(material->a));
 		outfile.write((char*)&material->r, sizeof(material->r));
 		outfile.write((char*)&material->g, sizeof(material->g));
@@ -1805,6 +1813,7 @@ int main(int argc, const char** argv) {
 	outfile.write((char*)&tmp, sizeof(tmp));
 	for (auto& gameObject: gameObjects) {
 		outfile.write((char*)&gameObject->active, sizeof(gameObject->active));
+		outfile.write((char*)&gameObject->movable, sizeof(gameObject->movable));
 		native::r_matrix_t ltw = {
 			gameObject->transform->m00, gameObject->transform->m10, gameObject->transform->m20, gameObject->transform->m30,
 			gameObject->transform->m01, gameObject->transform->m11, gameObject->transform->m21, gameObject->transform->m31,

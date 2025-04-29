@@ -22,20 +22,7 @@ namespace native {
         RGBAf color;
         RGBAf emission;
         texture_t* texture;
-
-        bool hasAlpha() {
-            if (color.alpha != 1) {
-                return true;
-            }
-            
-            // Todo: this needs to be exported from unity
-            // if (texture) {
-			// 	auto fmt = (texture->flags >> 27) & 7;
-			// 	return fmt == 0 || fmt == 2;
-			// }
-
-            return false;
-        }
+        uint8_t mode;
     };
 
     struct mesh_t {
@@ -111,12 +98,21 @@ namespace native {
         dst->pos_w = 1;
     }
 
-    enum game_object_inactive_t {
+    enum game_object_flags_t {
         goi_active = 0,
         goi_inactive = 1,
-        goi_inactive_parent = 2
+        goi_inactive_parent = 2,
+        goi_mask = 3,
+
+        go_movable = 4
     };
+
     
+    struct animated_light_t {
+        point_light_t* light;
+        int8_t* intensities;
+    };
+
     struct game_object_t {
         r_matrix_t ltw;
         r_vector3_t position;
@@ -133,10 +129,11 @@ namespace native {
 
         mesh_t* mesh;
         int8_t** bakedColors;
+        animated_light_t*** partiallyBakedColors;
         material_t** materials;
         size_t submesh_count;
         int logical_submesh = -1;
-        /*game_object_inactive_t*/ unsigned inactiveFlags;
+        /*game_object_inactive_t*/ unsigned flags;
         bool mesh_enabled;
 
         bool isActive() const;

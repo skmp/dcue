@@ -26,8 +26,11 @@ namespace import {
         float a, r, g, b;
         float ea, er, eg, eb;
         texture_t* texture;
-        material_t(float a, float r, float g, float b, float ea, float er, float eg, float eb, texture_t* texture)
+        uint8_t mode;
+
+        material_t(uint8_t mode, float a, float r, float g, float b, float ea, float er, float eg, float eb, texture_t* texture)
         {
+            this->mode = mode;
             this->a = a;
             this->r = r;
             this->g = g;
@@ -104,11 +107,13 @@ namespace import {
         mesh_t* mesh;
         material_t** materials;
         bool active;
+        bool movable;
         bool mesh_enabled;
 
-        game_object_t(bool active, matrix_t* transform, bool mesh_enabled, mesh_t* mesh, material_t** materials)
+        game_object_t(bool active, bool movable, matrix_t* transform, bool mesh_enabled, mesh_t* mesh, material_t** materials)
         {
             this->active = active;
+            this->movable = movable;
             this->transform = transform;
             this->mesh_enabled = mesh_enabled;
             this->mesh = mesh;

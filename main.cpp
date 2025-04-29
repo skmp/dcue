@@ -191,6 +191,78 @@ struct alignas(32) pvr_vertex32_ut {
 	float b; 
 };
 
+void WriteOBJ(
+    const pvr_vertex32_ut* verts,
+    std::size_t vertCount,
+    const uint8_t*        indices,
+    std::size_t           idxCount,
+    const std::string&    filename)
+{
+    std::ofstream out(filename);
+    if (!out.good()) {
+		assert(false);
+    }
+
+    // Header & formatting
+    out << "# OBJ exported by WriteOBJ_Strips\n";
+    out << std::fixed << std::setprecision(6);
+
+    // 1) Emit all vertices with per‐vertex color (RGB), ignoring alpha
+    for (std::size_t i = 0; i < vertCount; ++i) {
+        const auto& v = verts[i*2];
+        out << "v "
+            << v.x << ' ' << v.y << ' ' << v.z << ' '
+            << v.r << ' ' << v.g << ' ' << v.b << "\n";
+    }
+
+    // 2) Walk through the strip indices, accumulate each strip, then emit its triangles
+    std::vector<uint32_t> strip;
+    strip.reserve(128);
+
+    auto flush_strip = [&]() {
+        // Need at least 3 verts to form one triangle
+        if (strip.size() < 3)
+            return;
+
+        // Triangle-strip to triangle list, alternating winding
+        for (size_t j = 2; j < strip.size(); ++j) {
+            uint32_t i0, i1, i2;
+            if ((j & 1) == 0) {
+                // even: (j-2, j-1, j)
+                i0 = strip[j - 2];
+                i1 = strip[j - 1];
+                i2 = strip[j];
+            } else {
+                // odd: (j-1, j-2, j)
+                i0 = strip[j - 1];
+                i1 = strip[j - 2];
+                i2 = strip[j];
+            }
+            // OBJ is 1-based
+            out << "f "
+                << (i0 + 1) << ' '
+                << (i1 + 1) << ' '
+                << (i2 + 1) << "\n";
+        }
+        strip.clear();
+    };
+
+    // Parse the index bytes
+    for (std::size_t k = 0; k < idxCount; ++k) {
+        uint8_t b = indices[k];
+        uint32_t vi = b & 0x7F;       // lower 7 bits = vertex index
+        bool   end = (b & 0x80) != 0; // high bit = end of strip
+
+        strip.push_back(vi);
+        if (end) {
+            flush_strip();
+        }
+    }
+    // In case the last strip wasn’t terminated by a marker:
+    flush_strip();
+
+    out.close();
+}
 
 static pvr_dr_state_t drState;
 
@@ -291,7 +363,7 @@ bool loadScene(const char* scene) {
     // Read and verify header (8 bytes)
     char header[9] = { 0};
     in.read(header, 8);
-    if (strncmp(header, "DCUENS04", 8) != 0) {
+    if (strncmp(header, "DCUENS05", 8) != 0) {
         std::cout << "Invalid file header: " << header << std::endl;
         return false;
     }
@@ -319,6 +391,9 @@ bool loadScene(const char* scene) {
     materials.resize(materialCount);
     for (uint32_t i = 0; i < materialCount; ++i) {
         auto material = materials[i] = new material_t();
+
+		in.read((char*)&material->mode, sizeof(material->mode));
+
         in.read((char*)&material->color.alpha, sizeof(material->color.alpha));
 		in.read((char*)&material->color.red, sizeof(material->color.red));
 		in.read((char*)&material->color.green, sizeof(material->color.green));
@@ -362,8 +437,14 @@ bool loadScene(const char* scene) {
 		bool active;
         in.read((char*)&active, sizeof(active));
 		if (!active) {
-			go->inactiveFlags = goi_inactive;
+			go->flags = goi_inactive;
 		}
+		bool movable;
+        in.read((char*)&movable, sizeof(movable));
+		if (movable) {
+			go->flags |= go_movable;
+		}
+
         in.read(reinterpret_cast<char*>(&go->ltw.m00), 16 * sizeof(float));
         in.read((char*)&go->mesh_enabled, sizeof(go->mesh_enabled));
 
@@ -447,6 +528,17 @@ void dce_set_mat_vertex_color(const RGBAf* residual, const RGBAf* material) {
 	DCE_MESHLET_MAT_VERTEX_COLOR[3][1] = 128 * material->green + residual->green;
 	DCE_MESHLET_MAT_VERTEX_COLOR[3][2] = 128 * material->red + residual->red;
 	DCE_MESHLET_MAT_VERTEX_COLOR[3][3] = residual->alpha;
+}
+
+void dce_set_mat_vertex_color_light(const point_light_t* light, const RGBAf* material) {
+	DCE_MESHLET_MAT_VERTEX_COLOR[0][0] = light->color.blue * light->intensity * material->blue;
+	DCE_MESHLET_MAT_VERTEX_COLOR[1][1] = light->color.green * light->intensity * material->green;
+	DCE_MESHLET_MAT_VERTEX_COLOR[2][2] = light->color.red * light->intensity * material->red;
+
+	DCE_MESHLET_MAT_VERTEX_COLOR[3][0] = 128 * light->color.blue * light->intensity * material->blue;
+	DCE_MESHLET_MAT_VERTEX_COLOR[3][1] = 128 * light->color.green * light->intensity * material->green;
+	DCE_MESHLET_MAT_VERTEX_COLOR[3][2] = 128 * light->color.red * light->intensity * material->red;
+	DCE_MESHLET_MAT_VERTEX_COLOR[3][3] = 0;
 }
 
 // void DCE_MatrixViewport(float x, float y, float width, float height) {
@@ -1103,6 +1195,48 @@ __attribute__ ((noinline)) void tnlMeshletVertexColorBaked(uint8_t* dstCol, cons
 	*--cols = cR;
 	*--cols = cA;
 }
+__attribute__ ((noinline)) void tnlMeshletVertexColorPartiallyBaked(uint8_t* dstCol, const int8_t* colData, uint32_t vertexCount) {
+	const int8_t* next_vertex = colData;
+	dcache_pref_block(next_vertex);
+	float cB, cG, cR, cA;
+
+	auto vertex = next_vertex;
+	next_vertex += 1;
+	float c = *vertex++;
+	vertexCount--;
+
+	dstCol += 4 * sizeof(float);
+	do {
+		vertex = next_vertex;
+		// should be alraedy in cache
+		dcache_pref_block(vertex + 32);
+
+		next_vertex += 1;
+
+		float* cols = (float*)dstCol;
+		
+		mat_trans_nodiv_nomod(c, c, c, cB, cG, cR, cA);
+
+		*--cols += cB;
+		*--cols += cG;
+		*--cols += cR;
+		*--cols += cA;
+		c = *vertex++;
+		
+		dstCol += 64;
+	} while(--vertexCount != 0);
+
+	float* cols = (float*)dstCol;
+
+	mat_trans_nodiv_nomod(c, c, c, cB, cG, cR, cA);
+
+	*--cols += cB;
+	*--cols += cG;
+	*--cols += cR;
+	*--cols += cA;
+}
+
+
 
 template <unsigned cntDiffuse, bool floatNormals>
 __attribute__ ((noinline)) void tnlMeshletDiffuseColor(uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const RGBAf *lights) {
@@ -1252,12 +1386,10 @@ __attribute__ ((noinline)) void tnlMeshletPointColor(uint8_t* srcPos, uint8_t* d
 		#else
 		float rawNdotL = normal.x * toL.x + normal.y * toL.y + normal.z * toL.z;
 		#endif
-		float invLen = 1.0f/sqrtf(d2);
 		
 		float lightAmt = rawNdotL;
-		// float att = invLen * invLen;
 		float att = 1.0f / (1.0f + 25.0f * (d2 / r2));
-		lightAmt *= att / length(normal);
+		lightAmt *= att;
 
 		if (lightAmt > 0.0001f) {
 
@@ -1348,12 +1480,10 @@ __attribute__ ((noinline)) void tnlMeshletPointColorBake(uint8_t* srcPos, uint8_
 		#else
 		float rawNdotL = normal.x * toL.x + normal.y * toL.y + normal.z * toL.z;
 		#endif
-		float invLen = 1.0f/sqrtf(d2);
 		
 		float lightAmt = rawNdotL;
-		// float att = invLen * invLen;
 		float att = 1.0f / (1.0f + 25.0f * (d2 / r2));
-		lightAmt *= att / length(normal);
+		lightAmt *= att;
 
 		if (lightAmt > 0.0001f) {
 
@@ -1379,6 +1509,101 @@ __attribute__ ((noinline)) void tnlMeshletPointColorBake(uint8_t* srcPos, uint8_
 
 		srcPos += vertexSize;
 		dstCol += 3;
+	} while(--vertexCount != 0);
+}
+
+
+template <bool small_xyz, bool floatNormals>
+__attribute__ ((noinline)) void tnlMeshletPointColorPartialBake(uint8_t* srcPos, uint8_t* dstInt, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t* light, matrix_t* ltwd, matrix_t* normalmtx) {
+	
+	const uint8_t* next_vertex = normalData;
+	dcache_pref_block(next_vertex);
+
+	V3d lightPos = light->gameObject->ltw.pos;
+
+	const float r2 = light->Range*light->Range;
+
+	do {
+		auto vertex = next_vertex;
+		dcache_pref_block(vertex + 32);
+		next_vertex += vertexSize;
+
+		const int8_t* inxyz = (const int8_t*)vertex;
+
+
+		float x, y, z, w;
+
+		mat_load(ltwd);
+		if (!small_xyz) {
+			auto stripVert = reinterpret_cast<const V3d *>(srcPos);
+
+			mat_trans_nodiv_nomod(stripVert->x, stripVert->y, stripVert->z, x, y, z, w);
+
+		} else {
+			auto stripVert = reinterpret_cast<const int16_t *>(srcPos);
+
+			mat_trans_nodiv_nomod((float)stripVert[0], (float)stripVert[1], (float)stripVert[2], 
+								x, y, z, w);
+		}
+
+		const V3d pos = { x, y, z };
+
+		(void)w;
+
+		V3d toL = sub(lightPos, pos);
+
+		V3d normal;
+		if (!floatNormals) {
+			normal = { static_cast<float>(inxyz[0])/127, static_cast<float>(inxyz[1])/127, static_cast<float>(inxyz[2])/127};
+		} else {
+			normal = *(V3d*)inxyz;
+		}
+
+		mat_load(normalmtx);
+
+		mat_trans_nodiv_nomod_zerow(normal.x, normal.y, normal.z, x, y, z, w);
+
+		normal = { x, y, z};
+		normal = normalize(normal);
+		(void)w;
+
+		#if defined(DC_SH4)
+		float d2 = fipr_magnitude_sqr(toL.x, toL.y, toL.z, 0);
+		#else
+		float d2 = toL.x * toL.x + toL.y * toL.y + toL.z * toL.z;
+		#endif
+
+		toL = normalize(toL);
+
+		#if defined(DC_SH4)
+		float rawNdotL = fipr(normal.x, normal.y, normal.z, 0, toL.x, toL.y, toL.z, 0);
+		#else
+		float rawNdotL = normal.x * toL.x + normal.y * toL.y + normal.z * toL.z;
+		#endif
+		
+		float lightAmt = rawNdotL;
+		float att = 1.0f / (1.0f + 25.0f * (d2 / r2));
+		lightAmt *= att;
+
+		if (lightAmt > 0.0001f) {
+
+
+			uint8_t* cols = dstInt;
+
+			#define COLADD(dC) do { \
+				uint32_t dc = *cols; \
+				dc += dC * 255; \
+				if (dc > 255) dc = 255; \
+				*cols = dc; \
+			} while(false)
+			
+			COLADD(lightAmt); cols++;
+
+			#undef COLADD
+		}
+
+		srcPos += vertexSize;
+		dstInt += 1;
 	} while(--vertexCount != 0);
 }
 
@@ -2069,6 +2294,10 @@ static constexpr void (*tnlMeshletVertexColorBakedSelector[1])(uint8_t* dstCol, 
 	&tnlMeshletVertexColorBaked,
 };
 
+static constexpr void (*tnlMeshletVertexColorPartiallyBakedSelector[1])(uint8_t* dstCol, const int8_t* colData, uint32_t vertexCount) = {
+	&tnlMeshletVertexColorPartiallyBaked,
+};
+
 //tnlMeshletDiffuseColor
 static constexpr void (*tnlMeshletDiffuseColorSelector[8])(uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const RGBAf *lights) = {
 	&tnlMeshletDiffuseColor<1, false>,
@@ -2082,14 +2311,19 @@ static constexpr void (*tnlMeshletDiffuseColorSelector[8])(uint8_t* dstCol, cons
 	&tnlMeshletDiffuseColor<4, true>,
 };
 
-static constexpr void (*tnlMeshletPointColorSelector[8])(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t *light, float det, matrix_t* ltwd, matrix_t* normalmtx, material_t* material) = {
+static constexpr void (*tnlMeshletPointColorSelector[2])(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t *light, float det, matrix_t* ltwd, matrix_t* normalmtx, material_t* material) = {
 	&tnlMeshletPointColor<false, false>,
 	&tnlMeshletPointColor<true, false>,
 };
 
-static constexpr void (*tnlMeshletPointColorBakeSelector[8])(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t *light, matrix_t* ltwd, matrix_t* normalmtx) = {
+static constexpr void (*tnlMeshletPointColorBakeSelector[2])(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t *light, matrix_t* ltwd, matrix_t* normalmtx) = {
 	&tnlMeshletPointColorBake<false, false>,
 	&tnlMeshletPointColorBake<true, false>,
+};
+
+static constexpr void (*tnlMeshletPointColorPartialBakeSelector[2])(uint8_t* srcPos, uint8_t* dstCol, const uint8_t* normalData, uint32_t vertexCount, uint32_t vertexSize, const point_light_t *light, matrix_t* ltwd, matrix_t* normalmtx) = {
+	&tnlMeshletPointColorPartialBake<false, false>,
+	&tnlMeshletPointColorPartialBake<true, false>,
 };
 
 static void (*submitMeshletSelector[2])(uint8_t* OCR, const int8_t* indexData, uint32_t indexCount) = {
@@ -2154,6 +2388,30 @@ float GetMaxScale(const r_matrix_t& mat) {
     return std::sqrt(std::max({scaleRight, scaleUp, scaleAt}));
 }
 
+inline r_matrix_t localToWorldNormal(const r_matrix_t& ltw) {
+	auto mtxNormal3x3 = ltw;
+	mtxNormal3x3.pos.x = 0;
+	mtxNormal3x3.pos.y = 0;
+	mtxNormal3x3.pos.z = 0;
+
+	r_matrix_t mtxNormalInv;
+	float det2;
+	invertGeneral(&mtxNormalInv, &det2, &mtxNormal3x3);
+
+	r_matrix_t mtxNormalInvTransp = { 0 };
+	mtxNormalInvTransp.m00 = mtxNormalInv.m00;
+	mtxNormalInvTransp.m10 = mtxNormalInv.m01;
+	mtxNormalInvTransp.m20 = mtxNormalInv.m02;
+	mtxNormalInvTransp.m01 = mtxNormalInv.m10;
+	mtxNormalInvTransp.m11 = mtxNormalInv.m11;
+	mtxNormalInvTransp.m21 = mtxNormalInv.m12;
+	mtxNormalInvTransp.m02 = mtxNormalInv.m20;
+	mtxNormalInvTransp.m12 = mtxNormalInv.m21;
+	mtxNormalInvTransp.m22 = mtxNormalInv.m22;
+
+	return mtxNormalInvTransp;
+}
+
 #if defined(DEBUG_LOOKAT)
 game_object_t* pointedGameObject = nullptr;
 #endif
@@ -2163,9 +2421,9 @@ static float zBuffer[32][32];
 unsigned total_idx;
 #endif
 
-bool hasPointLights = false;
+bool forceDynamicLights = false;
 
-template<int list>
+template<int list, int mode>
 void renderMesh(camera_t* cam, game_object_t* go) {
 
 	bool isTransp = list != PVR_LIST_OP_POLY;
@@ -2317,7 +2575,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
     const MeshInfo* meshInfo = (const MeshInfo*)&go->mesh->data[0];
 
     for (size_t submesh_num = 0; submesh_num < go->submesh_count; submesh_num++) {
-		if (go->materials[submesh_num]->hasAlpha() != isTransp) {
+		if (go->materials[submesh_num]->mode != mode) {
 			continue;
 		}
         pvr_poly_hdr_t hdr;
@@ -2489,7 +2747,7 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 dce_set_mat_vertex_color(&residual, &material);
                 mat_load(&DCE_MESHLET_MAT_VERTEX_COLOR);
                 tnlMeshletVertexColorSelector[0](OCR_SPACE + dstColOffset, (int8_t*)&go->mesh->data[meshlet->vertexOffset] + colOffset, meshlet->vertexCount, meshlet->vertexSize);
-            } else if (go->bakedColors && !hasPointLights) {
+            } else if (go->bakedColors && !forceDynamicLights) {
 				// colorsBase
 				unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
                 dce_set_mat_vertex_color(&residual, &material);
@@ -2527,7 +2785,22 @@ void renderMesh(camera_t* cam, game_object_t* go) {
                 }
             }
 
-			if (hasPointLights) {
+			
+			if (go->partiallyBakedColors && go->partiallyBakedColors[submesh_num][meshletNum] && !forceDynamicLights) {
+				auto animatedLights = go->partiallyBakedColors[submesh_num][meshletNum];
+
+				while(animatedLights->light) {
+					if (animatedLights->light->gameObject->isActive()) {
+						dce_set_mat_vertex_color_light(animatedLights->light, &material);
+						mat_load(&DCE_MESHLET_MAT_VERTEX_COLOR);
+						unsigned dstColOffset = textured ? offsetof(pvr_vertex64_t, a) : offsetof(pvr_vertex32_ut, a);
+						tnlMeshletVertexColorPartiallyBakedSelector[0](OCR_SPACE + dstColOffset, animatedLights->intensities, meshlet->vertexCount);
+					}
+					animatedLights++;
+				}
+			}
+
+			{
 				unsigned normalOffset = (selector & 8) ? (3 * 2) : (3 * 4);
                 if (selector & 16) {
                     normalOffset += 1 * 2;
@@ -2552,12 +2825,20 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 				matrix_t mtx;
 				mat_store(&mtx);
 
-				for (auto point = point_lights; *point; point++) {
+				r_matrix_t mtxNormal = localToWorldNormal(go->ltw);
+
+				auto point_light_list = dynamic_point_lights;
+
+				if (forceDynamicLights || (go->flags & go_movable)) {
+					point_light_list = point_lights;
+				}
+
+				for (auto point = point_light_list; *point; point++) {
 					if ((*point)->gameObject->isActive()) {
 						float dist = length(sub((*point)->gameObject->ltw.pos, sphere.center));
 						float maxDist = sphere.radius + (*point)->Range;
 						if (dist < maxDist) {
-							tnlMeshletPointColorSelector[smallSelector](&go->mesh->data[meshlet->vertexOffset], OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, *point, det, &mtx, (matrix_t*)&go->ltw, go->materials[submesh_num]);
+							tnlMeshletPointColorSelector[smallSelector](&go->mesh->data[meshlet->vertexOffset], OCR_SPACE + dstColOffset, normalPointer, meshlet->vertexCount, vtxSize, *point, det, &mtx, (matrix_t*)&mtxNormal, go->materials[submesh_num]);
 						}
 					}
 				}
@@ -3255,6 +3536,39 @@ void animator_t::update(float deltaTime) {
 						target->materials[0] = materials[value];
 					}
 				}
+				break;
+
+				case Light_Color_b: {
+					auto light = target->getComponent<point_light_t>();
+					if (light) {
+						light->color.blue = value + t * (nextValue - value);
+					}
+				}
+				break;
+
+				case Light_Color_g: {
+					auto light = target->getComponent<point_light_t>();
+					if (light) {
+						light->color.green = value + t * (nextValue - value);
+					}
+				}
+				break;
+
+				case Light_Color_r: {
+					auto light = target->getComponent<point_light_t>();
+					if (light) {
+						light->color.red = value + t * (nextValue - value);
+					}
+				}
+				break;
+
+				case Light_Intensity: {
+					auto light = target->getComponent<point_light_t>();
+					if (light) {
+						light->intensity = value + t * (nextValue - value);
+					}
+				}
+				break;
             }
         }
     }
@@ -3272,7 +3586,7 @@ void animator_t::update(float deltaTime) {
 }
 
 bool native::game_object_t::isActive() const {
-	if (inactiveFlags & goi_inactive) {
+	if (flags & goi_inactive) {
 		return false;
 	} else if (parent) {
 		return parent->isActive();
@@ -3324,7 +3638,9 @@ void recusrive_disable(game_object_t* go) {
 
 void native::game_object_t::setActive(bool active) {
 	bool wasActive = isActive();
-	inactiveFlags = !active ? goi_inactive : 0;
+	bool newFlags = !active ? goi_inactive : 0;
+
+	flags = (flags & ~goi_mask) | newFlags;
 
 	bool nowActive = isActive();
 
@@ -4556,21 +4872,26 @@ void renderSelfAndChildren(camera_t* cam, game_object_t* go) {
 	if (!go->compoundVisible) return;
 
 	if (go->mesh_enabled && go->mesh && go->materials) {
-		if (mode == 0 && go->materials[0]->color.alpha == 1) {
+		if (mode == 0 && go->materials[0]->mode == 0) {
 			renderQuads(cam, go);
 		}
 		bool hasAnyOpaque = false;
+		bool hasAnyPT = false;
 		bool hasAnyTransp = false;
 		for (int subM = 0; subM < go->submesh_count; subM++) {
-			bool hasAlpha = go->materials[subM]->hasAlpha();
-			hasAnyOpaque |= !hasAlpha;
-			hasAnyTransp |= hasAlpha;
+			auto matMode = go->materials[subM]->mode;
+			hasAnyOpaque |= matMode == 0;
+			hasAnyPT |= matMode == 1;
+			hasAnyTransp |= matMode == 2;
 		}
 		if (mode == 1 && hasAnyOpaque) {
-			renderMesh<PVR_LIST_OP_POLY>(cam, go);
+			renderMesh<PVR_LIST_OP_POLY, 0>(cam, go);
 		}
-		if (mode == 2 && hasAnyTransp) {
-			renderMesh<PVR_LIST_TR_POLY>(cam, go);
+		if (mode == 2 && hasAnyPT) {
+			renderMesh<PVR_LIST_PT_POLY, 1>(cam, go);
+		}
+		if (mode == 3 && hasAnyTransp) {
+			renderMesh<PVR_LIST_TR_POLY, 2>(cam, go);
 		}
 	}
 	auto childNum = go->children;
@@ -4726,7 +5047,7 @@ static void render_skybox(camera_t* camera) {
 
 void bakeLights() {
 	for (auto gameObject: gameObjects) {
-		if (!gameObject->mesh || !gameObject->materials) {
+		if (!gameObject->mesh || !gameObject->materials || (gameObject->flags & go_movable)) {
 			continue;
 		}
 
@@ -4736,6 +5057,8 @@ void bakeLights() {
 		std::vector<size_t> submesh_colors;
 		size_t colorsSize = 0;
 
+		bool hasPartialBakes = false;
+		std::vector<std::vector<std::vector<animated_light_t>>> mesh_partial_bake;
 		for (size_t submesh_num = 0; submesh_num < (gameObject->submesh_count /*+ gameObject->logical_submesh*/); submesh_num++) {
 			if (!gameObject->materials[submesh_num]) {
 				// huh?
@@ -4745,6 +5068,8 @@ void bakeLights() {
 			bool textured = gameObject->materials[submesh_num]->texture != nullptr;
 			
 			submesh_colors.push_back(colorsSize);
+
+			std::vector<std::vector<animated_light_t>> sumesh_partial_bake;
 			for (int16_t meshletNum = 0; meshletNum < meshInfo[submesh_num].meshletCount; meshletNum++) {
 				auto meshlet = (const MeshletInfo*)meshletInfoBytes;
 				meshletInfoBytes += sizeof(MeshletInfo) - 8 ; // (skin ? 0 : 8);
@@ -4793,22 +5118,79 @@ void bakeLights() {
 					matrix_t mtx;
 					mat_store(&mtx);
 
+					r_matrix_t mtxNormal = localToWorldNormal(gameObject->ltw);
+
+					std::vector<animated_light_t> meshlet_partially_baked;
+
 					for (auto point = point_lights; *point; point++) {
-						/*if ((*point)->gameObject->isActive())*/ {
+						/*if ((*point)->gameObject->isActive())*/
+						if (!(*point)->isMovable) {
 							float dist = length(sub((*point)->gameObject->ltw.pos, sphere.center));
 							float maxDist = sphere.radius + (*point)->Range;
 							if (dist < maxDist) {
-								tnlMeshletPointColorBakeSelector[smallSelector](&gameObject->mesh->data[meshlet->vertexOffset], &colors[colorsBase], normalPointer, meshlet->vertexCount, vtxSize, *point, &mtx, (matrix_t*)&gameObject->ltw);
+								if ((*point)->isAnimated) {
+									auto intensitiesSize = meshlet->vertexCount;
+									auto intensities = (uint8_t*)malloc(intensitiesSize);
+									memset(intensities, 0, intensitiesSize);
+									meshlet_partially_baked.push_back(animated_light_t{*point, (int8_t*)intensities});
+									hasPartialBakes = true;
+									tnlMeshletPointColorPartialBakeSelector[smallSelector](&gameObject->mesh->data[meshlet->vertexOffset], intensities, normalPointer, meshlet->vertexCount, vtxSize, *point, &mtx, (matrix_t*)&mtxNormal);
+
+									for (size_t ii = 0; ii < intensitiesSize; ii++) {
+										intensities[ii] ^= 128;
+									}
+								} else {
+									tnlMeshletPointColorBakeSelector[smallSelector](&gameObject->mesh->data[meshlet->vertexOffset], &colors[colorsBase], normalPointer, meshlet->vertexCount, vtxSize, *point, &mtx, (matrix_t*)&mtxNormal);
+								}
 							}
 						}
 					}
+
+					if (meshlet_partially_baked.size()) {
+						sumesh_partial_bake.push_back(std::move(meshlet_partially_baked));
+					} else {
+						sumesh_partial_bake.emplace_back();
+					}
 				}
 			}
+
+			mesh_partial_bake.push_back(std::move(sumesh_partial_bake));
 		}
 	
 		gameObject->bakedColors =(int8_t**)malloc(submesh_colors.size()*sizeof(int8_t*));
 		for (size_t i = 0; i < submesh_colors.size(); i++) {
 			gameObject->bakedColors[i] = (int8_t*)colors + submesh_colors[i];
+		}
+
+		if (hasPartialBakes) {
+			// mesh_partial_bake
+			animated_light_t*** meshPartialBakes = (animated_light_t***)malloc(sizeof(animated_light_t**) * mesh_partial_bake.size());
+			// for (auto& sumesh_partial_bake: mesh_partial_bake) {
+			for (size_t sumesh_partial_bake_num = 0; sumesh_partial_bake_num < mesh_partial_bake.size(); sumesh_partial_bake_num++ ) {
+				auto& sumesh_partial_bake = mesh_partial_bake[sumesh_partial_bake_num];
+				animated_light_t** submeshPartialBakes = (animated_light_t**)malloc(sizeof(animated_light_t*) * sumesh_partial_bake.size());
+				meshPartialBakes[sumesh_partial_bake_num] = submeshPartialBakes;
+
+				for (size_t meshlet_partial_bake_num = 0; meshlet_partial_bake_num < sumesh_partial_bake.size(); meshlet_partial_bake_num++ ) {
+					auto& meshlet_partial_bake = sumesh_partial_bake[meshlet_partial_bake_num];
+
+					if (meshlet_partial_bake.size()) {
+						animated_light_t* meshletPartialBakes = (animated_light_t*)malloc(sizeof(animated_light_t) * (meshlet_partial_bake.size() + 1));
+						submeshPartialBakes[meshlet_partial_bake_num] = meshletPartialBakes;
+
+						for (size_t light_partial_bake_num = 0; light_partial_bake_num < meshlet_partial_bake.size(); light_partial_bake_num++ ) {
+							meshletPartialBakes[light_partial_bake_num].intensities = meshlet_partial_bake[light_partial_bake_num].intensities;
+							meshletPartialBakes[light_partial_bake_num].light = meshlet_partial_bake[light_partial_bake_num].light;
+						}
+						meshletPartialBakes[meshlet_partial_bake.size()].light = nullptr;
+					} else {
+						submeshPartialBakes[meshlet_partial_bake_num] = nullptr;
+					}
+				}
+			}
+			gameObject->partiallyBakedColors = meshPartialBakes;
+		} else {
+			gameObject->partiallyBakedColors = nullptr;
 		}
 		
 		for (size_t i = 0; i < colorsSize; i++) {
@@ -5123,12 +5505,24 @@ int main(int argc, const char** argv) {
 		} while(*rootNum != SIZE_MAX);
 		
         pvr_list_finish();
+
+		PVR_SET(0x11C, 64); // PT Alpha test value
+
+        pvr_dr_init(&drState);
+        pvr_list_begin(PVR_LIST_PT_POLY);
+
+		rootNum = roots;
+		do {
+			renderSelfAndChildren<2>(currentCamera, gameObjects[*rootNum++]);
+		} while(*rootNum != SIZE_MAX);
+		
+        pvr_list_finish();
 		
         pvr_dr_init(&drState);
         pvr_list_begin(PVR_LIST_TR_POLY);
 		rootNum = roots;
 		do {
-			renderSelfAndChildren<2>(currentCamera, gameObjects[*rootNum++]);
+			renderSelfAndChildren<3>(currentCamera, gameObjects[*rootNum++]);
 		} while(*rootNum != SIZE_MAX);
 		
 		#if defined(DC_SIM)
