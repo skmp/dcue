@@ -41,6 +41,8 @@ struct box_collider_t {
     V3d center;
     V3d halfSize;
 
+    bool enabled = true;
+    
     reactphysics3d::RigidBody* rigidBody;
     reactphysics3d::Collider* collider;
     reactphysics3d::BoxShape* boxShape;
@@ -55,6 +57,8 @@ struct sphere_collider_t {
 
     V3d center;
     float radius;
+
+    bool enabled = true;
 
     reactphysics3d::RigidBody* rigidBody;
     reactphysics3d::Collider* collider;
@@ -72,6 +76,8 @@ struct capsule_collider_t {
     float radius;
     float height;
 
+    bool enabled = true;
+
     reactphysics3d::RigidBody* rigidBody;
     reactphysics3d::Collider* collider;
     reactphysics3d::CapsuleShape* capsuleShape;
@@ -86,6 +92,8 @@ struct mesh_collider_t {
 
     float* vertices;
     bvh_t* bvh;
+
+    bool enabled = true;
 
     reactphysics3d::TriangleMesh* triangleMesh;
     reactphysics3d::RigidBody* rigidBody;

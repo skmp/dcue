@@ -4442,6 +4442,7 @@ void box_collider_t::update(float deltaTime) {
 	reactphysics3d::Vector3 scale3d;
 	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
+	rigidBody->setIsActive(enabled);
 
 	if (boxShape == nullptr) {
 		if (collider) {
@@ -4479,6 +4480,7 @@ void sphere_collider_t::update(float deltaTime) {
 	reactphysics3d::Vector3 scale3d;
 	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
+	rigidBody->setIsActive(enabled);
 
 	if (sphereShape == nullptr) {
 		if (collider) {
@@ -4516,6 +4518,7 @@ void capsule_collider_t::update(float deltaTime) {
 	reactphysics3d::Vector3 scale3d;
 	t.setFromOpenGL(&localOffset[0][0]);
 	rigidBody->setTransform(t);
+	rigidBody->setIsActive(enabled);
 	
 	if (capsuleShape == nullptr) {
 		if (collider) {
@@ -4545,6 +4548,7 @@ void mesh_collider_t::update(float deltaTime) {
 
 	t.setFromOpenGL(&gameObject->ltw.m00);
 	rigidBody->setTransform(t);
+	rigidBody->setIsActive(enabled);
 
 	
 	if (meshShape == nullptr) {

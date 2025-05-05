@@ -75,7 +75,7 @@ Task pavo_unit_set_active_t::enter() {
 
 Task pavo_unit_set_enabled_t::enter() {
     if (targetBoxColliderIndex != SIZE_MAX) {
-        // box_colliders[targetBoxColliderIndex]->enabled = setTo;
+        box_colliders[targetBoxColliderIndex]->enabled = setTo;
         std::cout << "TODO: box_colliders[targetBoxColliderIndex]->enabled = setTo; " << targetBoxColliderIndex << " " << setTo << std::endl;
     }
     return onExit->enter();
@@ -138,12 +138,12 @@ Task pavo_unit_audio_source_play_t::enter() {
 }
 
 Task pavo_unit_mesh_renderer_set_enabled_t::enter() {
-    std::cout << "TODO: pavo_unit_mesh_renderer_set_enabled_t::enter " << std::endl;
+    gameObjects[targetGameObjectIndex]->mesh_enabled = setTo;
     return onExit->enter();
 }
 
 Task pavo_unit_mesh_collider_set_enabled_t::enter() {
-    std::cout << "TODO: pavo_unit_mesh_collider_set_enabled_t::enter " << std::endl;
+    mesh_colliders[targetMeshColliderIndex]->enabled = setTo;
     return onExit->enter();
 }
 
