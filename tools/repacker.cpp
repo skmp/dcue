@@ -747,32 +747,8 @@ void loadDreamScene(const char *scene) {
 	// --- Terrain Section ---
 	int terrainCount = 0;
     in.read(reinterpret_cast<char*>(&terrainCount), sizeof(int));
-	for (int i = 0; i < terrainCount; i++) {
-		float sizex,sizey,sizez;
-
-		in.read(reinterpret_cast<char*>(&sizex), sizeof(float));
-		in.read(reinterpret_cast<char*>(&sizey), sizeof(float));
-		in.read(reinterpret_cast<char*>(&sizez), sizeof(float));
-
-		float tscalex, tscaley;
-		in.read(reinterpret_cast<char*>(&tscalex), sizeof(float));
-		in.read(reinterpret_cast<char*>(&tscaley), sizeof(float));
-
-		float toffsetx, toffsety;
-		in.read(reinterpret_cast<char*>(&toffsetx), sizeof(float));
-		in.read(reinterpret_cast<char*>(&toffsety), sizeof(float));
-
-		int width, height;
-		in.read(reinterpret_cast<char*>(&width), sizeof(int));
-		in.read(reinterpret_cast<char*>(&height), sizeof(int));
-
-		float* tdata = new float[width*height];
-		in.read(reinterpret_cast<char*>(tdata), width*height*sizeof(float));
-		terrain_t* terrain = new terrain_t(sizex,sizey,sizez, tscalex, tscaley, toffsetx, toffsety, width, height, tdata);
-
-		terrains.push_back(terrain);
-	}
-
+	assert(terrainCount == 0);
+	
     // --- Game Objects Section ---
     int gameObjectCount = 0;
     in.read(reinterpret_cast<char*>(&gameObjectCount), sizeof(int));
@@ -824,109 +800,12 @@ void loadDreamScene(const char *scene) {
 			}
         }
 
-		terrain_t* terrain = nullptr;
-		{
-			int terrainIndex = 0;
-			in.read(reinterpret_cast<char*>(&terrainIndex), sizeof(int));
-			if (terrainIndex >= 0 && terrainIndex < static_cast<int>(terrains.size()))
-				terrain = terrains[terrainIndex];
-		}
-
-		material_t* terrain_material = nullptr;
-		{
-			int materialIndex = 0;
-			in.read(reinterpret_cast<char*>(&materialIndex), sizeof(int));
-			if (materialIndex >= 0 && materialIndex < static_cast<int>(materials.size()))
-				terrain_material = materials[materialIndex];
-		}
-
-		if (terrain) {
-			assert(!materials_lst);
-			assert(!mesh);
-
-			auto hmm = std::make_shared<Heightmap>(terrain->width, terrain->height, std::vector<float>(terrain->tdata, terrain->tdata + terrain->width* terrain->height));
-			Triangulator tri(hmm);
-
-			tri.Run(0.02, 0, 0);
-        	auto points = tri.Points(1);
-        	auto triangles = tri.Triangles();
-			
-
-			int vertexCount = points.size();
-			assert(vertexCount < 65535);
-			float* vertices = new float[vertexCount * 3];
-
-			float* uvs = new float[vertexCount * 2];
-			for (int i = 0; i < vertexCount; i++) {
-				uvs[i * 2 + 0] = points[i].x / terrain->width * terrain->tscalex + terrain->toffsetx;
-				uvs[i * 2 + 1] = points[i].y / terrain->height * terrain->tscaley + terrain->toffsety;
-			}
-
-			for (int i = 0; i < vertexCount; i++) {
-				float nx = points[i].x / terrain->width * terrain->sizex;
-				float nz = (terrain->height-points[i].y) / terrain->height * terrain->sizez;
-				float ny = points[i].z * terrain->sizey;
-				vertices[i * 3 + 0] = points[i].x = nx;
-				vertices[i * 3 + 1] =points[i].y = ny;
-				vertices[i * 3 + 2] =points[i].z = nz;
-			}
-
-			std::vector<glm::vec3> normals(points.size(), glm::vec3(0.0f));
-
-			// Calculate face normals and accumulate them for each vertex.
-			for(const auto &tri : triangles) {
-				// Get the vertices of the triangle.
-				glm::vec3 v0 = points[tri.x];
-				glm::vec3 v1 = points[tri.y];
-				glm::vec3 v2 = points[tri.z];
-
-				// Calculate edge vectors.
-				glm::vec3 edge1 = v1 - v0;
-				glm::vec3 edge2 = v2 - v0;
-
-				// Compute the face normal using cross product and normalize it.
-				glm::vec3 faceNormal = glm::normalize(glm::cross(edge1, edge2));
-
-				// Accumulate the face normal into each vertex normal.
-				normals[tri.x] += faceNormal;
-				normals[tri.y] += faceNormal;
-				normals[tri.z] += faceNormal;
-			}
-
-			// Normalize the accumulated vertex normals.
-			for (auto &normal : normals) {
-				normal = glm::normalize(normal);
-			}
-
-			float* normals_ptr = new float[vertexCount * 3];
-
-			for (int i = 0; i < vertexCount; i++) {
-				normals_ptr[i * 3 + 0] = normals[i].x;
-				normals_ptr[i * 3 + 1] = normals[i].y;
-				normals_ptr[i * 3 + 2] = normals[i].z;
-			}
-
-
-			int indexCount = triangles.size() * 3;
-			uint16_t* indices = new uint16_t[indexCount];
-			
-			for (int i = 0; i < triangles.size(); i++) {
-				indices[i * 3 + 0] = triangles[i].x;
-				indices[i * 3 + 1] = triangles[i].y;
-				indices[i * 3 + 2] = triangles[i].z;
-			}
-			submesh_t* submeshes = new submesh_t[1];
-			submeshes[0].index_count = indexCount;
-			submeshes[0].indices = indices;
-
-			mesh = new mesh_t(1, 0, submeshes, vertexCount, vertices, uvs, nullptr, normals_ptr);
-			meshes.push_back(mesh);
-
-			materials_lst = new material_t*[1];
-			materials_lst[0] = terrain_material;
-
-			meshEnabled = true; // TODO: Fixme
-		}
+		int terrainIndex = 0;
+		in.read(reinterpret_cast<char*>(&terrainIndex), sizeof(int));
+		assert(terrainIndex == -1);
+		int terrainMaterialIndex = 0;
+		in.read(reinterpret_cast<char*>(&terrainMaterialIndex), sizeof(int));
+		assert(terrainMaterialIndex == -1);
 
         game_object_t* go = new game_object_t(active, movable, transform, meshEnabled, mesh, materials_lst);
         gameObjects.push_back(go);
