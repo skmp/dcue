@@ -2376,16 +2376,21 @@ struct alignas(8) UniformObject
 	int lightCount;
 };
 
-float GetMaxScale(const r_matrix_t& mat) {
-    // Compute the scale factors for each axis
-    float scaleRight = mat.right.x * mat.right.x + mat.right.y * mat.right.y + mat.right.z * mat.right.z;
+// 1/∞–norm bound
+float GetMaxScale(const r_matrix_t& m) {
+    // 1-norm = max column-sum
+    float c0 = fabs(m.right.x) + fabs(m.right.y) + fabs(m.right.z);
+    float c1 = fabs(m.up.x)    + fabs(m.up.y)    + fabs(m.up.z);
+    float c2 = fabs(m.at.x)    + fabs(m.at.y)    + fabs(m.at.z);
+    float norm1 = std::max({c0,c1,c2});
 
-    float scaleUp = mat.up.x * mat.up.x + mat.up.y * mat.up.y + mat.up.z * mat.up.z;
+    // inf-norm = max row-sum
+    float r0 = fabs(m.right.x) + fabs(m.up.x) + fabs(m.at.x);
+    float r1 = fabs(m.right.y) + fabs(m.up.y) + fabs(m.at.y);
+    float r2 = fabs(m.right.z) + fabs(m.up.z) + fabs(m.at.z);
+    float normInf = std::max({r0,r1,r2});
 
-    float scaleAt = mat.at.x * mat.at.x + mat.at.y * mat.at.y + mat.at.z * mat.at.z;
-
-    // Return the maximum scale factor
-    return std::sqrt(std::max({scaleRight, scaleUp, scaleAt}));
+    return std::sqrt(norm1 * normInf);
 }
 
 inline r_matrix_t localToWorldNormal(const r_matrix_t& ltw) {
@@ -2556,8 +2561,9 @@ void renderMesh(camera_t* cam, game_object_t* go) {
 			uniformObject.col[n].red *= (*directional)->intensity;
 			uniformObject.col[n].green *= (*directional)->intensity;
 			uniformObject.col[n].blue *= (*directional)->intensity;
+			V3d at = normalize((*directional)->gameObject->ltw.at);
 			mat_trans_nodiv_nomod_zerow(
-				-(*directional)->gameObject->ltw.at.x, -(*directional)->gameObject->ltw.at.y, -(*directional)->gameObject->ltw.at.z,
+				-at.x, -at.y, -at.z,
 				uniformObject.dir[n>>2][0][n&3],
 				uniformObject.dir[n>>2][1][n&3],
 				uniformObject.dir[n>>2][2][n&3],
@@ -4014,7 +4020,8 @@ void player_movement_t::update(float deltaTime) {
 		GroundRaycastCallback<10.f> moveCheck;
 	
 		reactphysics3d::Vector3 playaPos = {playa->ltw.pos.x, playa->ltw.pos.y + 3.8f/2, playa->ltw.pos.z}; // TODO: the 3.8f should come from the character controller
-		reactphysics3d::Vector3 forwardAt = { playa->ltw.at.x, playa->ltw.at.y, playa->ltw.at.z};
+		V3d playerAt = normalize(playa->ltw.at);
+		reactphysics3d::Vector3 forwardAt = { playerAt.x, playerAt.y, playerAt.z};
 	
 		if (movement < 0) {
 			forwardAt.z = -forwardAt.z;
@@ -4126,7 +4133,8 @@ void mouse_look_t::update(float deltaTime) {
 			LookAtCheck<50.f> lookAtChecker;
 
 			reactphysics3d::Vector3 cameraPos = {gameObject->ltw.pos.x, gameObject->ltw.pos.y, gameObject->ltw.pos.z};
-			reactphysics3d::Vector3 cameraAt = {gameObject->ltw.at.x, gameObject->ltw.at.y, gameObject->ltw.at.z};
+			V3d cameraAtNrm = normalize(gameObject->ltw.at);
+			reactphysics3d::Vector3 cameraAt = {cameraAtNrm.x, cameraAtNrm.y, cameraAtNrm.z};
 			reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*50);
 			
 			// physics is one step behind here
@@ -4249,7 +4257,8 @@ void interactable_message_t::update(game_object_t* mainCamera) {
 	LookAtCheck<25.f> lookAtChecker;
 
 	reactphysics3d::Vector3 cameraPos = {mainCamera->ltw.pos.x, mainCamera->ltw.pos.y, mainCamera->ltw.pos.z};
-	reactphysics3d::Vector3 cameraAt = {mainCamera->ltw.at.x, mainCamera->ltw.at.y, mainCamera->ltw.at.z};
+	V3d cameraAtNrm = normalize(mainCamera->ltw.at);
+	reactphysics3d::Vector3 cameraAt = {cameraAtNrm.x, cameraAtNrm.y, cameraAtNrm.z};
 	reactphysics3d::Ray ray(cameraPos, cameraPos + cameraAt*25);
 	
 	// physics is one step behind here
@@ -4784,8 +4793,10 @@ void positionUpdate() {
 		mat_apply((matrix_t*)&rot_mtx_z);
 		mat_apply((matrix_t*)&scale_mtx);
 		mat_store((matrix_t*)&go->ltw);
-		go->maxWorldScale = GetMaxScale(go->ltw);
+
 		if (go->mesh && go->mesh_enabled) {
+			go->maxWorldScale = GetMaxScale(go->ltw);
+
 			Sphere &sphere = go->mesh->bounding_sphere;
 			float w;
 			mat_trans_nodiv_nomod(sphere.center.x, sphere.center.y, sphere.center.z, go->meshSphere.center.x, go->meshSphere.center.y, go->meshSphere.center.z, w);

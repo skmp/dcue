@@ -31,7 +31,7 @@ struct camera_t {
         V3d v73 = sub(c[3], c[7]);
 
         /* Far plane */
-        p[0].normal = gameObject->ltw.at;
+        p[0].normal = normalize(gameObject->ltw.at);
         p[0].distance = dot(p[0].normal, c[4]);
 
         /* Near plane */
@@ -65,10 +65,11 @@ struct camera_t {
         V3d up = scale(gameObject->ltw.up, viewWindow.y);
         V3d left = scale(gameObject->ltw.right, viewWindow.x);
         V3d *c = frustumCorners;
-        c[0] = add(add(gameObject->ltw.at, up), left);	// top left
-        c[1] = sub(add(gameObject->ltw.at, up), left);	// top right
-        c[2] = sub(sub(gameObject->ltw.at, up), left);	// bottom right
-        c[3] = add(sub(gameObject->ltw.at, up), left);	// bottom left
+        V3d at = normalize(gameObject->ltw.at);
+        c[0] = add(add(at, up), left);	// top left
+        c[1] = sub(add(at, up), left);	// top right
+        c[2] = sub(sub(at, up), left);	// bottom right
+        c[3] = add(sub(at, up), left);	// bottom left
 
         /* Now Calculate near and far corners. */
         V3d off = sub(scale(gameObject->ltw.up, viewOffset.y),
