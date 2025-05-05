@@ -131,3 +131,23 @@ Task pavo_unit_show_message_t::enter()  {
     }
     co_yield onExit->enter();
 }
+
+Task pavo_unit_audio_source_play_t::enter() {
+    std::cout << "TODO: pavo_unit_audio_source_play_t::enter " << std::endl;
+    return onExit->enter();
+}
+
+Task pavo_unit_mesh_renderer_set_enabled_t::enter() {
+    std::cout << "TODO: pavo_unit_mesh_renderer_set_enabled_t::enter " << std::endl;
+    return onExit->enter();
+}
+
+Task pavo_unit_mesh_collider_set_enabled_t::enter() {
+    std::cout << "TODO: pavo_unit_mesh_collider_set_enabled_t::enter " << std::endl;
+    return onExit->enter();
+}
+
+Task pavo_unit_play_sound_t::enter() {
+    std::cout << "TODO: pavo_unit_play_sound_t::enter " << std::endl;
+    return onExit->enter();
+}

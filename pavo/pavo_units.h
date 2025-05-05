@@ -190,3 +190,47 @@ struct pavo_unit_set_enabled_t: pavo_unit_t {
 
     pavo_unit_set_enabled_t(pavo_unit_t* onExit, size_t targetBoxColliderIndex, bool setTo): onExit(onExit), targetBoxColliderIndex(targetBoxColliderIndex), setTo(setTo) { }
 };
+
+
+struct pavo_unit_audio_source_play_t: pavo_unit_t {
+    pavo_unit_t* onExit;
+
+    size_t audioSourceIndex;
+
+    Task enter() override;
+
+    pavo_unit_audio_source_play_t(pavo_unit_t* onExit, size_t audioSourceIndex): onExit(onExit), audioSourceIndex(audioSourceIndex) { }
+};
+
+struct pavo_unit_mesh_renderer_set_enabled_t: pavo_unit_t {
+    pavo_unit_t* onExit;
+
+    size_t targetGameObjectIndex;
+    bool setTo;
+
+    Task enter() override;
+
+    pavo_unit_mesh_renderer_set_enabled_t(pavo_unit_t* onExit, size_t targetGameObjectIndex, bool setTo): onExit(onExit), targetGameObjectIndex(targetGameObjectIndex), setTo(setTo) { }
+};
+
+struct pavo_unit_mesh_collider_set_enabled_t: pavo_unit_t {
+    pavo_unit_t* onExit;
+
+    size_t targetMeshColliderIndex;
+    bool setTo;
+
+    Task enter() override;
+
+    pavo_unit_mesh_collider_set_enabled_t(pavo_unit_t* onExit, size_t targetMeshColliderIndex, bool setTo): onExit(onExit), targetMeshColliderIndex(targetMeshColliderIndex), setTo(setTo) { }
+};
+
+struct pavo_unit_play_sound_t: pavo_unit_t {
+    pavo_unit_t* onExit;
+
+    size_t audioSourceIndex;
+    size_t audioClipIndex;
+
+    Task enter() override;
+
+    pavo_unit_play_sound_t(pavo_unit_t* onExit, size_t audioSourceIndex, size_t audioClipIndex): onExit(onExit), audioSourceIndex(audioSourceIndex), audioClipIndex(audioClipIndex) { }
+};
