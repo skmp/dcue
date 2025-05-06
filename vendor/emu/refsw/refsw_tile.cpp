@@ -14,20 +14,25 @@
 #include <float.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "refsw_tile.h"
 #include "TexUtils.h"
+#include <cassert>
 
+
+TagState       tagStatus[MAX_RENDER_PIXELS];
 parameter_tag_t tagBuffer[2] [MAX_RENDER_PIXELS];
 StencilType     stencilBuffer[MAX_RENDER_PIXELS];
 u32             colorBuffer1 [MAX_RENDER_PIXELS];
 u32             colorBuffer2 [MAX_RENDER_PIXELS];
-ZType           depthBuffer[2] [MAX_RENDER_PIXELS];
+ZType           depthBuffer[3] [MAX_RENDER_PIXELS];
 
-u32 tagBufferA;
-u32 tagBufferB;
-u32 depthBufferA;
-u32 depthBufferB;
+constexpr const u32 tagBufferA = 0;
+constexpr const u32 tagBufferB = 1;
+constexpr const u32 depthBufferA = 0;
+constexpr const u32 depthBufferB = 1;
+constexpr const u32 depthBufferC = 2;
 
 static float mmin(float a, float b, float c, float d)
 {
@@ -54,74 +59,53 @@ f32  mask_w(f32 w) {
 
 void ClearBuffers(u32 paramValue, float depthValue, u32 stencilValue)
 {
-    depthBufferA = 0;
-    depthBufferB = 1;
-
-    tagBufferA = 0;
-    tagBufferB = 1;
-
     auto zb = depthBuffer[depthBufferA];
     auto stencil = stencilBuffer;
-    auto pb = tagBuffer[tagBufferA];
+    auto pb = tagBuffer[tagBufferA];;
 
     for (int i = 0; i < MAX_RENDER_PIXELS; i++) {
         zb[i] = mask_w(depthValue);
         stencil[i] = stencilValue;
         pb[i] = paramValue;
+        tagStatus[i] = { true, false };
     }
 }
 
-void ClearParamBuffer(parameter_tag_t paramValue) {
-    tagBufferA = 0;
-    tagBufferB = 1;
-
-    auto pb = tagBuffer[tagBufferA];
+void ClearParamStatusBuffer() {
+    auto ts = tagStatus;
 
     for (int i = 0; i < MAX_RENDER_PIXELS; i++) {
-        pb[i] = paramValue;
+        ts[i] = { false, false };
     }
 }
 
 void PeelBuffersPTInitial(float depthValue) {
-    tagBufferA = 1;
-    tagBufferB = 0;
-
-    auto zb2 = depthBuffer[depthBufferB];
+    memcpy(depthBuffer[depthBufferC], depthBuffer[depthBufferA], sizeof(ZType) * MAX_RENDER_PIXELS);
+    auto ts = tagStatus;
 
     for (int i = 0; i < MAX_RENDER_PIXELS; i++) {
-        zb2[i] = mask_w(depthValue);// set the "furthest" test to furthest value possible
-        tagBuffer[tagBufferA][i] = TAG_INVALID;
+        ts[i] = { false, false };
+        stencilBuffer[i] = 0;
     }
 }
 
 void PeelBuffersPT() {
-    auto zb = depthBuffer[depthBufferA];
-    auto zb2 = depthBuffer[depthBufferB];
-
-    for (int i = 0; i < MAX_RENDER_PIXELS; i++) {
-        zb2[i] = zb[i];  // keep old zb for 
-    }
-}
-
-void PeelBuffersPTAfterHoles() {
-    std::swap(tagBufferB, tagBufferA);
-    for (int i = 0; i < MAX_RENDER_PIXELS; i++) {
-        tagBuffer[tagBufferA][i] = TAG_INVALID;
-    }
+    memcpy(depthBuffer[depthBufferB], depthBuffer[depthBufferA], sizeof(ZType) * MAX_RENDER_PIXELS);
+    memcpy(tagBuffer[tagBufferB], tagBuffer[tagBufferA], sizeof(parameter_tag_t) * MAX_RENDER_PIXELS);
 }
 
 void PeelBuffers(float depthValue, u32 stencilValue)
 {
-    std::swap(depthBufferB, depthBufferA);
-    std::swap(tagBufferB, tagBufferA);
+    memcpy(depthBuffer[depthBufferB], depthBuffer[depthBufferA], sizeof(ZType) * MAX_RENDER_PIXELS);
+    memcpy(tagBuffer[tagBufferB], tagBuffer[tagBufferA], sizeof(parameter_tag_t) * MAX_RENDER_PIXELS);
+
 
     auto zb = depthBuffer[depthBufferA];
-    auto zb2 = depthBuffer[depthBufferB];
     auto stencil = stencilBuffer;
 
     for (int i = 0; i < MAX_RENDER_PIXELS; i++) {
         zb[i] = mask_w(depthValue);    // set the "closest" test to furthest value possible
-        tagBuffer[tagBufferA][i] = TAG_INVALID;
+        tagStatus[i] = { false, false };
         stencil[i] = stencilValue;
     }
 }
@@ -164,7 +148,8 @@ bool GetMoreToDraw()
 
     // Render to ACCUM from TAG buffer
 // TAG holds references to trianes, ACCUM is the tile framebuffer
-void RenderParamTags(RenderMode rm, int tileX, int tileY) {
+template<RenderMode rm>
+void RenderParamTags(int tileX, int tileY) {
     float halfpixel = HALF_OFFSET.tsp_pixel_half_offset ? 0.5f : 0;
     taRECT rect;
     rect.left = tileX;
@@ -176,39 +161,45 @@ void RenderParamTags(RenderMode rm, int tileX, int tileY) {
         for (int x = 0; x < 32; x++) {
             auto index = y * 32 + x;
             auto tag =  tagBuffer[tagBufferA][index];
-            ISP_BACKGND_T_type t { .full = tag & ~TAG_INVALID };
+            ISP_BACKGND_T_type t { .full = tag };
             bool InVolume = (stencilBuffer[index] & 0b001) == 0b001 && t.shadow;
-            bool TagValid = !(tag & TAG_INVALID);
+            bool TagValid = tagStatus[index].valid;
             
-            if (TagValid || (rm == RM_OP_PT_MV && InVolume)) {
-                auto Entry = GetFpuEntry(&rect, rm, t);
+            if (rm == RM_PUNCHTHROUGH_MV && !InVolume) {
+                continue;
+            }
+
+            if (rm == RM_PUNCHTHROUGH_PASS0 || rm == RM_PUNCHTHROUGH_PASSN) {
+                InVolume = false;
+            }
+
+            if (TagValid) {
+                const auto& Entry = GetFpuEntry(&rect, rm, t);
                 auto invW = Entry.ips.invW.Ip(x + halfpixel, y + halfpixel);
-                bool AlphaTestPassed = PixelFlush_tsp(rm == RM_PUNCHTHROUGH, &Entry, x + halfpixel, y + halfpixel, index, invW, InVolume);
+                bool AlphaTestPassed = PixelFlush_tsp(rm == RM_PUNCHTHROUGH_PASS0 || rm == RM_PUNCHTHROUGH_PASSN, &Entry, x + halfpixel, y + halfpixel, index, invW, InVolume);
 
-                auto pb = tagBuffer[tagBufferA] + index;
-
-                *pb |= TAG_INVALID;
-
-                // can only happen when rm == RM_PUNCHTHROUGH
-                if (!AlphaTestPassed) {
-                     MoreToDraw = true;
-                     // Feedback Channel
-                     depthBuffer[depthBufferA][index] = ISP_BACKGND_D.f;
+                if (rm == RM_PUNCHTHROUGH_PASS0 || rm == RM_PUNCHTHROUGH_PASSN) {
+                    // can only happen when rm == RM_PUNCHTHROUGH
+                    if (!AlphaTestPassed) {
+                        MoreToDraw = true;
+                        // Feedback Channel
+                        depthBuffer[depthBufferA][index] = depthBuffer[depthBufferC][index];
+                    } else {
+                        tagStatus[index].rendered = true;
+                    }
                 }
             }
         }
     }
 }
 
-void ClearFpuEntries() {
-
-}
-
-f32 f16(u16 v)
-{
-    u32 z=v<<16;
-    return *(f32*)&z;
-}
+template void RenderParamTags<RM_OPAQUE>(int tileX, int tileY);
+template void RenderParamTags<RM_PUNCHTHROUGH_PASS0>(int tileX, int tileY);
+template void RenderParamTags<RM_PUNCHTHROUGH_PASSN>(int tileX, int tileY);
+template void RenderParamTags<RM_PUNCHTHROUGH_MV>(int tileX, int tileY);
+template void RenderParamTags<RM_TRANSLUCENT_AUTOSORT>(int tileX, int tileY);
+template void RenderParamTags<RM_TRANSLUCENT_PRESORT>(int tileX, int tileY);
+template void RenderParamTags<RM_MODIFIER>(int tileX, int tileY);
 
 #define vert_packed_color_(to,src) \
 	{ \
@@ -313,25 +304,29 @@ u32 decode_pvr_vertices(DrawParameters* params, pvr32addr_t base, u32 skip, u32 
     return base;
 }
 
-FpuEntry GetFpuEntry(taRECT *rect, RenderMode render_mode, ISP_BACKGND_T_type core_tag)
+struct {
+    FpuEntry entry;
+    u32      tag;
+} fpuCache[32];
+
+const FpuEntry& GetFpuEntry(taRECT *rect, RenderMode render_mode, ISP_BACKGND_T_type core_tag)
 {
-    FpuEntry entry = {};
+    if (fpuCache[core_tag.param_offs_in_words & 31].tag == core_tag.full) {
+        return fpuCache[core_tag.param_offs_in_words & 31].entry;
+    }
+    FpuEntry &entry = fpuCache[core_tag.param_offs_in_words & 31].entry;
     Vertex vtx[3];
     decode_pvr_vertices(&entry.params, PARAM_BASE + core_tag.param_offs_in_words * 4, core_tag.skip, core_tag.shadow & ~FPU_SHAD_SCALE.intensity_shadow, vtx, 3, core_tag.tag_offset);
 
     entry.ips.Setup(rect, &entry.params, vtx[0], vtx[1], vtx[2], core_tag.shadow & ~FPU_SHAD_SCALE.intensity_shadow);
 
-    return entry;
+    fpuCache[core_tag.param_offs_in_words & 31].tag = core_tag.full;
+
+    return fpuCache[core_tag.param_offs_in_words & 31].entry ;
 }
 
-// Lookup/create cached TSP parameters, and call PixelFlush_tsp
-bool PixelFlush_tsp(bool pp_AlphaTest, FpuEntry* entry, float x, float y, u32 index, float invW, bool InVolume)
-{
-    u32 two_voume_index = InVolume & !FPU_SHAD_SCALE.intensity_shadow;
-    return PixelFlush_tsp(entry->params.tsp[two_voume_index].UseAlpha, entry->params.isp.Texture, entry->params.isp.Offset, entry->params.tsp[two_voume_index].ColorClamp, entry->params.tsp[two_voume_index].FogCtrl,
-                                        entry->params.tsp[two_voume_index].IgnoreTexA, entry->params.tsp[two_voume_index].ClampU, entry->params.tsp[two_voume_index].ClampV, entry->params.tsp[two_voume_index].FlipU,  entry->params.tsp[two_voume_index].FlipV,  entry->params.tsp[two_voume_index].FilterMode,  entry->params.tsp[two_voume_index].ShadInstr,  
-                                        pp_AlphaTest,  entry->params.tsp[two_voume_index].SrcSelect,  entry->params.tsp[two_voume_index].DstSelect,  entry->params.tsp[two_voume_index].SrcInstr,  entry->params.tsp[two_voume_index].DstInstr,
-                                        entry, x, y, 1/invW, InVolume, index);
+void ClearFpuCache() {
+    memset(fpuCache, 0, sizeof(fpuCache));
 }
 
 // this is disabled for now, as it breaks game scenes
@@ -343,8 +338,146 @@ bool IsTopLeft(float x, float y) {
     return true;
 }
 
+
+// Depth processing for a pixel -- render_mode 0: OPAQ, 1: PT, 2: TRANS
+template<RenderMode render_mode>
+inline __attribute__((always_inline)) void PixelFlush_isp(u32 depth_mode, u32 ZWriteDis, float x, float y, float invW, u32 index, parameter_tag_t tag)
+{
+    auto pb = tagBuffer[tagBufferA] + index;
+    auto ts = tagStatus + index;
+    auto pb2 = tagBuffer[tagBufferB] + index;
+    auto zb = depthBuffer[depthBufferA] + index;
+    auto zb2 = depthBuffer[depthBufferB] + index;
+    auto stencil = stencilBuffer + index;
+
+    auto mode = depth_mode;
+        
+    if (render_mode == RM_PUNCHTHROUGH_PASS0 || render_mode == RM_PUNCHTHROUGH_PASSN)
+        mode = 6;
+    else if (render_mode == RM_TRANSLUCENT_AUTOSORT)
+        mode = 3;
+    else if (render_mode == RM_MODIFIER)
+        mode = 6;
+        
+    switch(mode) {
+        // never
+        case 0: return; break;
+        // less
+        case 1: if (invW >= *zb) return; break;
+        // equal
+        case 2: if (invW != *zb) return; break;
+        // less or equal
+        case 3: if (invW > *zb) {
+            if (render_mode == RM_TRANSLUCENT_AUTOSORT) {
+                MoreToDraw = true;
+            }
+            return;
+        }break;
+        // greater
+        case 4: if (invW <= *zb) return; break;
+        // not equal
+        case 5: if (invW == *zb) return; break;
+        // greater or equal
+        case 6: if (invW < *zb) return; break;
+        // always
+        case 7: break;
+    }
+
+    switch (render_mode)
+    {
+        // OPAQ
+        case RM_OPAQUE:
+        {
+            // Z pre-pass only
+            if (!ZWriteDis) {
+                *zb = mask_w(invW);
+            }
+            *pb = tag;
+            ts->valid = 1;
+        }
+        break;
+
+        case RM_MODIFIER:
+        {
+            // Flip on Z pass
+
+            *stencil ^= 0b0010;
+
+            // This pixel has valid stencil for summary
+            *stencil |= 0b100;
+        }
+        break;
+
+        case RM_PUNCHTHROUGH_PASS0:
+        {
+            *zb = mask_w(invW);
+            *pb = tag;
+
+            ts->valid = 1;
+        }
+        break;
+        // PT
+        case RM_PUNCHTHROUGH_PASSN:
+        {
+            if (ts->rendered)
+                return;
+            
+            if (invW > *zb2)
+                return;
+
+            if (invW == *zb2) {
+                auto tagRendered = *pb2;
+
+                if (tag <= tagRendered)
+                    return;
+            }
+            
+            MoreToDraw = true;
+
+            *zb = mask_w(invW);
+            *pb = tag;
+        }
+        break;
+
+        // Layer Peeling. zb2 holds the reference depth, zb is used to find closest to reference
+        case RM_TRANSLUCENT_PRESORT:
+        {
+            if (!ZWriteDis) {
+                *zb = mask_w(invW);
+            }
+            *pb = tag;
+            ts->valid = true;
+        }
+        break;
+        case RM_TRANSLUCENT_AUTOSORT:
+        {
+            if (invW < *zb2)
+                return;
+
+            if (invW == *zb2) {
+                auto tagRendered = *pb2;
+
+                if (tag >= tagRendered)
+                    return;
+            }
+
+            *zb = mask_w(invW);
+
+            if (ts->valid) {
+                MoreToDraw = true;
+            }
+            ts->valid = true;
+            *pb = tag;
+        }
+        break;
+
+        case RM_PUNCHTHROUGH_MV: die("this is invalid here"); break;
+    }
+}
+
 // Rasterize a single triangle to ISP (or ISP+TSP for PT)
-void RasterizeTriangle(RenderMode render_mode, DrawParameters* params, parameter_tag_t tag, const Vertex& v1, const Vertex& v2, const Vertex& v3, const Vertex* v4, taRECT* area)
+template<RenderMode render_mode>
+void RasterizeTriangle(DrawParameters* params, parameter_tag_t tag, const Vertex& v1, const Vertex& v2, const Vertex& v3, const Vertex* v4, taRECT* area)
 {
     const int stride_bytes = STRIDE_PIXEL_OFFSET * 4;
     //Plane equation
@@ -444,14 +577,7 @@ void RasterizeTriangle(RenderMode render_mode, DrawParameters* params, parameter
             if (inTriangle) {
                 u32 index = y * 32 + x;
                 float invW = Z.Ip(x_ps, y_ps);
-                PixelFlush_isp(render_mode, params->isp.DepthMode, params->isp.ZWriteDis, x_ps, y_ps, invW, index, tag);
-
-                if (render_mode == RM_TRANSLUCENT && ISP_FEED_CFG.pre_sort && !(tagBuffer[tagBufferA][index] & TAG_INVALID)) {
-                    ISP_BACKGND_T_type t { .full = tagBuffer[tagBufferA][index] };
-                    auto Entry = GetFpuEntry(area, RM_TRANSLUCENT, t);
-                    PixelFlush_tsp(false, &Entry, x_ps, y_ps, index, invW, false);
-                    tagBuffer[tagBufferA][index] |= TAG_INVALID;
-                }
+                PixelFlush_isp<render_mode>(params->isp.DepthMode, params->isp.ZWriteDis, x_ps, y_ps, invW, index, tag);
             }
 
             x_ps = x_ps + 1;
@@ -460,15 +586,25 @@ void RasterizeTriangle(RenderMode render_mode, DrawParameters* params, parameter
         y_ps = y_ps + 1;
     }
 }
-    
+
+void (*RasterizeTriangle_table[7])(DrawParameters* params, parameter_tag_t tag, const Vertex& v1, const Vertex& v2, const Vertex& v3, const Vertex* v4, taRECT* area) = {
+    &RasterizeTriangle<RM_OPAQUE>,
+    &RasterizeTriangle<RM_PUNCHTHROUGH_PASS0>,
+    &RasterizeTriangle<RM_PUNCHTHROUGH_PASSN>,
+    &RasterizeTriangle<RM_PUNCHTHROUGH_MV>,
+    &RasterizeTriangle<RM_TRANSLUCENT_AUTOSORT>,
+    &RasterizeTriangle<RM_TRANSLUCENT_PRESORT>,
+    &RasterizeTriangle<RM_MODIFIER>
+};
+
 u8* GetColorOutputBuffer() {
     return (u8*)colorBuffer1;
 }
 
 
 // Clamp and flip a texture coordinate
-static int ClampFlip( bool pp_Clamp, bool pp_Flip
-	                , int coord, int size) {
+template<bool pp_Clamp, bool pp_Flip>
+inline __attribute__((always_inline)) int ClampFlip(int coord, int size) {
     if (pp_Clamp) { // clamp
         if (coord < 0) {
             coord = 0;
@@ -561,7 +697,8 @@ static Color TextureFetchOld(TSP tsp, TCW tcw, int u, int v) {
 }
 #endif
 
-u32 ExpandToARGB8888(u32 color, u32 mode, bool ScanOrder /* TODO: Expansion Patterns */) {
+template<bool ScanOrder /* TODO: Expansion Patterns */>
+inline __attribute__((always_inline)) u32 ExpandToARGB8888(u32 color, u32 mode) {
 	switch(mode)
 	{
         case 0: return ARGB1555_32(color);
@@ -572,27 +709,29 @@ u32 ExpandToARGB8888(u32 color, u32 mode, bool ScanOrder /* TODO: Expansion Patt
     return 0xDEADBEEF;
 }
 
-u32 TexAddressGen(TCW tcw) {
+template<bool VQ_Comp>
+inline __attribute__((always_inline)) u32 TexAddressGen(TCW tcw) {
     u32 base_address = tcw.TexAddr << 3;
 
-    if (tcw.VQ_Comp) {
+    if (VQ_Comp) {
         base_address += 256 * 4 * 2;
     }
 
     return base_address;
 }
 
-u32 TexOffsetGen(TSP tsp, TCW tcw, bool ScanOrder, int u, int v, u32 stride, u32 MipLevel) {
+template<bool VQ_Comp, bool MipMapped, bool ScanOrder>
+inline __attribute__((always_inline)) u32 TexOffsetGen(TSP tsp, int u, int v, u32 stride, u32 MipLevel) {
     u32 mip_offset;
     
-    if (tcw.MipMapped) {
+    if (MipMapped) {
         mip_offset = MipPoint[3 + tsp.TexU - MipLevel];
     } else {
         mip_offset = 0;
     }
 
-    if (tcw.VQ_Comp || !ScanOrder) {
-        if (tcw.MipMapped) {
+    if (VQ_Comp || !ScanOrder) {
+        if (MipMapped) {
             return mip_offset + twop(u, v, (tsp.TexU - MipLevel), (tsp.TexU - MipLevel));
         } else {
             return mip_offset + twop(u, v, tsp.TexU, tsp.TexV);
@@ -603,26 +742,27 @@ u32 TexOffsetGen(TSP tsp, TCW tcw, bool ScanOrder, int u, int v, u32 stride, u32
 }
 
 // 4.1 format
-u32 fBitsPerPixel(TCW tcw) {
-    u32 rv;
-    if (tcw.PixelFmt == PixelPal8) {
+template<bool VQ_Comp, u8 PixelFmt>
+inline constexpr u32 fBitsPerPixel() {
+    u32 rv = 16;
+    if (PixelFmt == PixelPal8) {
         rv = 8;
     }
-    else if (tcw.PixelFmt == PixelPal4) {
+    else if (PixelFmt == PixelPal4) {
         rv = 4;
     }
     else {
         rv = 16;
     }
 
-    if (tcw.VQ_Comp) {
+    if (VQ_Comp) {
         return 8 * 2 / (64 / rv); // 8 bpp / (pixels per 64 bits)
     } else {
         return rv * 2;
     }
 }
 
-u64 VQLookup(u32 start_address, u64 memtel, u32 offset) {
+inline __attribute__((always_inline)) u64 VQLookup(u32 start_address, u64 memtel, u32 offset) {
     u8* memtel8 = (u8*)&memtel;
 
     u64 *vq_book = (u64*)&emu_vram[start_address & (VRAM_MASK-7)];
@@ -630,14 +770,16 @@ u64 VQLookup(u32 start_address, u64 memtel, u32 offset) {
     return vq_book[index];
 }
 
-u32 TexStride(u32 TexU, u32 StrideSel, u32 ScanOrder, u32 MipLevel) {
+template<u32 StrideSel, u32 ScanOrder>
+inline __attribute__((always_inline)) u32 TexStride(u32 TexU, u32 MipLevel) {
     if (StrideSel && ScanOrder)
 		return (TEXT_CONTROL&31)*32;
     else
         return (8U << TexU) >> MipLevel;
 }
 
-u32 DecodeTextel(u32 PixelFmt, u32 PalSelect, u64 memtel, u32 offset) {
+template<u32 PixelFmt>
+inline __attribute__((always_inline)) u32 DecodeTextel(u32 PalSelect, u64 memtel, u32 offset) {
     auto memtel_32 = (u32*)&memtel;
     auto memtel_16 = (u16*)&memtel;
     auto memtel_8 = (u8*)&memtel;
@@ -673,7 +815,8 @@ u32 DecodeTextel(u32 PixelFmt, u32 PalSelect, u64 memtel, u32 offset) {
     return 0xDEADBEEF;
 }
 
-u32 GetExpandFormat(u32 PixelFmt) {
+template<u32 PixelFmt>
+inline __attribute__((always_inline)) u32 GetExpandFormat() {
     if (PixelFmt == PixelPal4 || PixelFmt == PixelPal8) {
         return PAL_RAM_CTRL&3;
     } else if (PixelFmt == PixelBumpMap || PixelFmt == PixelYUV) {
@@ -682,6 +825,7 @@ u32 GetExpandFormat(u32 PixelFmt) {
         return PixelFmt & 3;
     }
 }
+
 Color MipDebugColor[11] = {
     {.raw = 0xFF000060},
     {.raw = 0xFF000090},
@@ -699,42 +843,42 @@ Color MipDebugColor[11] = {
     {.raw = 0xFFF0F0F0},
 };
 
+template<bool VQ_Comp, bool MipMapped, bool ScanOrder_, bool StrideSel_, u8 PixelFmt>
 static Color TextureFetch(TSP tsp, TCW tcw, int u, int v, u32 MipLevel) {
-    
-    u32 PixelFmt = tcw.PixelFmt;
 
-    if (MipLevel == (tsp.TexU + 3)) {
-        if (PixelFmt == PixelYUV) {
-            PixelFmt = Pixel565;
-        }
-    }
+    // TODO: implement this
+    // if (MipLevel == (tsp.TexU + 3)) {
+    //     if (PixelFmt == PixelYUV) {
+    //         PixelFmt = Pixel565;
+    //     }
+    // }
 
     // These are fixed to zero for pal4/pal8
-    u32 ScanOrder = tcw.ScanOrder & ~(PixelFmt == PixelPal4 || PixelFmt == PixelPal8);
-    u32 StrideSel = tcw.StrideSel & ~(PixelFmt == PixelPal4 || PixelFmt == PixelPal8);
+    constexpr u32 ScanOrder = ScanOrder_ & ~(PixelFmt == PixelPal4 || PixelFmt == PixelPal8);
+    constexpr u32 StrideSel = StrideSel_ & ~(PixelFmt == PixelPal4 || PixelFmt == PixelPal8);
     
-    u32 stride = TexStride(tsp.TexU, StrideSel, ScanOrder, MipLevel);
+    u32 stride = TexStride<StrideSel, ScanOrder>(tsp.TexU, MipLevel);
 
     u32 start_address = tcw.TexAddr << 3;
 
-    auto fbpp = fBitsPerPixel(tcw);
+    auto fbpp = fBitsPerPixel<VQ_Comp, PixelFmt>();
     
-    auto base_address = TexAddressGen(tcw);
-    auto offset = TexOffsetGen(tsp, tcw, ScanOrder, u, v, stride, MipLevel);
+    auto base_address = TexAddressGen<VQ_Comp>(tcw);
+    auto offset = TexOffsetGen<VQ_Comp, MipMapped, ScanOrder>(tsp, u, v, stride, MipLevel);
 
     u64 memtel = (u64&)emu_vram[(base_address + offset * fbpp / 16) & (VRAM_MASK-7)];
 
-    if (tcw.VQ_Comp) {
+    if (VQ_Comp) {
         memtel = VQLookup(start_address, memtel, offset * fbpp / 16);
     }
 
-    u32 textel = DecodeTextel(PixelFmt, tcw.PalSelect, memtel, offset);
+    u32 textel = DecodeTextel<PixelFmt>(tcw.PalSelect, memtel, offset);
 
-    u32 expand_format = GetExpandFormat(PixelFmt);
+    u32 expand_format = GetExpandFormat<PixelFmt>();
 
     
 
-    textel = ExpandToARGB8888(textel, expand_format, tcw.ScanOrder);
+    textel = ExpandToARGB8888<ScanOrder>(textel, expand_format);
 
     // auto old = TextureFetch2(texture, u, v);
     // if (textel != old.raw) {
@@ -754,10 +898,11 @@ static Color TextureFetch(TSP tsp, TCW tcw, int u, int v, u32 MipLevel) {
 u32 to_u8_256(u8 v) {
     return v + (v >> 7);
 }
+using TextureFetch_fp = decltype(&TextureFetch<false, false, false, false, 0>);
+
 // Fetch pixels from UVs, interpolate
-static Color TextureFilter(
-	bool pp_IgnoreTexA,  bool pp_ClampU, bool pp_ClampV, bool pp_FlipU, bool pp_FlipV, u32 pp_FilterMode,
-	TSP tsp, TCW tcw, float u, float v, u32 MipLevel, f32 dTrilinear) {
+template<bool pp_IgnoreTexA,  bool pp_ClampU, bool pp_ClampV, bool pp_FlipU, bool pp_FlipV, u32 pp_FilterMode>
+static Color TextureFilter(TSP tsp, TCW tcw, float u, float v, u32 MipLevel, f32 dTrilinear, TextureFetch_fp fetch) {
         
     int halfpixel = HALF_OFFSET.texure_pixel_half_offset ? -127 : 0;
     if (MipLevel >= (tsp.TexU + 3)) {
@@ -776,10 +921,10 @@ static Color TextureFilter(
     int ui = u * sizeU * 256 + halfpixel;
     int vi = v * sizeV * 256 + halfpixel;
 
-    auto offset00 = TextureFetch(tsp, tcw, ClampFlip(pp_ClampU, pp_FlipU, (ui >> 8) + 1, sizeU), ClampFlip(pp_ClampV, pp_FlipV, (vi >> 8) + 1, sizeV), MipLevel);
-    auto offset01 = TextureFetch(tsp, tcw, ClampFlip(pp_ClampU, pp_FlipU, (ui >> 8) + 0, sizeU), ClampFlip(pp_ClampV, pp_FlipV, (vi >> 8) + 1, sizeV), MipLevel);
-    auto offset10 = TextureFetch(tsp, tcw, ClampFlip(pp_ClampU, pp_FlipU, (ui >> 8) + 1, sizeU), ClampFlip(pp_ClampV, pp_FlipV, (vi >> 8) + 0, sizeV), MipLevel);
-    auto offset11 = TextureFetch(tsp, tcw, ClampFlip(pp_ClampU, pp_FlipU, (ui >> 8) + 0, sizeU), ClampFlip(pp_ClampV, pp_FlipV, (vi >> 8) + 0, sizeV), MipLevel);
+    auto offset00 = fetch(tsp, tcw, ClampFlip<pp_ClampU, pp_FlipU>((ui >> 8) + 1, sizeU), ClampFlip<pp_ClampV, pp_FlipV>((vi >> 8) + 1, sizeV), MipLevel);
+    auto offset01 = fetch(tsp, tcw, ClampFlip<pp_ClampU, pp_FlipU>((ui >> 8) + 0, sizeU), ClampFlip<pp_ClampV, pp_FlipV>((vi >> 8) + 1, sizeV), MipLevel);
+    auto offset10 = fetch(tsp, tcw, ClampFlip<pp_ClampU, pp_FlipU>((ui >> 8) + 1, sizeU), ClampFlip<pp_ClampV, pp_FlipV>((vi >> 8) + 0, sizeV), MipLevel);
+    auto offset11 = fetch(tsp, tcw, ClampFlip<pp_ClampU, pp_FlipU>((ui >> 8) + 0, sizeU), ClampFlip<pp_ClampV, pp_FlipV>((vi >> 8) + 0, sizeV), MipLevel);
 
     Color textel = {0xAF674839};
 
@@ -792,17 +937,18 @@ static Color TextureFilter(
     } else if (pp_FilterMode == 1) {
         // Bilinear filtering
         int ublend = to_u8_256(ui & 255);
-        int vblend = (vi & 255);
+        int vblend = to_u8_256(vi & 255);
         int nublend = 256 - ublend;
         int nvblend = 256 - vblend;
 
         for (int i = 0; i < 4; i++)
         {
-            textel.bgra[i] =
-                (offset00.bgra[i] * ublend * vblend) / 65536 +
-                (offset01.bgra[i] * nublend * vblend) / 65536 +
-                (offset10.bgra[i] * ublend * nvblend) / 65536 +
-                (offset11.bgra[i] * nublend * nvblend) / 65536;
+            textel.bgra[i] = (
+                (offset00.bgra[i] * ublend * vblend) +
+                (offset01.bgra[i] * nublend * vblend) +
+                (offset10.bgra[i] * ublend * nvblend) +
+                (offset11.bgra[i] * nublend * nvblend)
+            ) / 65536;
         };
     } else {
         // trilinear filtering A and B
@@ -819,9 +965,8 @@ static Color TextureFilter(
 }
 
 // Combine Base, Textel and Offset colors
-static Color ColorCombiner(
-	bool pp_Texture, bool pp_Offset, u32 pp_ShadInstr,
-	Color base, Color textel, Color offset) {
+template<bool pp_Texture, bool pp_Offset, u32 pp_ShadInstr>
+static Color ColorCombiner(Color base, Color textel, Color offset) {
 
     Color rv = base;
     if (pp_Texture)
@@ -884,10 +1029,15 @@ static Color BumpMapper(Color textel, Color offset) {
     u8 K3 = offset.g;
     u8 Q = offset.b;
 
-    u8 S = offset.b;
-    u8 R = offset.g;
+    u8 R = textel.b;
+    u8 S = textel.g;
     
-    u8 I = u8(K1 + K2*BM_SIN90[S]/256 + K3*BM_COS90[S]*BM_COS360[(R - Q) & 255]/256/256);
+    s32 I = (K1*127*127 + K2*BM_SIN90[S]*127 + K3*BM_COS90[S]*BM_COS360[(R - Q) & 255])/127/127;
+    if (I < 0) {
+        I = 0;
+    } else if (I > 255) {
+        I = 255;
+    }
 
 	Color res;
 	res.b = 255;
@@ -898,9 +1048,8 @@ static Color BumpMapper(Color textel, Color offset) {
 }
 
 // Interpolate the base color, also cheap shadows modifier
-static Color InterpolateBase(
-	bool pp_UseAlpha, bool pp_CheapShadows,
-	const PlaneStepper3* Col, float x, float y, float W, bool InVolume) {
+template<bool pp_UseAlpha, bool pp_CheapShadows>
+inline __attribute__((always_inline)) Color InterpolateBase(const PlaneStepper3* Col, float x, float y, float W, bool InVolume) {
     Color rv;
     u32 mult = 256;
 
@@ -910,10 +1059,10 @@ static Color InterpolateBase(
         }
     }
 
-    rv.bgra[0] = 0.5f + Col[0].Ip(x, y, W) * mult / 256;
-    rv.bgra[1] = 0.5f + Col[1].Ip(x, y, W) * mult / 256;
-    rv.bgra[2] = 0.5f + Col[2].Ip(x, y, W) * mult / 256;
-    rv.bgra[3] = 0.5f + Col[3].Ip(x, y, W) * mult / 256;
+    rv.bgra[0] = 0.5f + Col[0].IpU8(x, y, W) * mult / 256;
+    rv.bgra[1] = 0.5f + Col[1].IpU8(x, y, W) * mult / 256;
+    rv.bgra[2] = 0.5f + Col[2].IpU8(x, y, W) * mult / 256;
+    rv.bgra[3] = 0.5f + Col[3].IpU8(x, y, W) * mult / 256;
 
     if (!pp_UseAlpha)
     {
@@ -924,8 +1073,8 @@ static Color InterpolateBase(
 }
 
 // Interpolate the offset color, also cheap shadows modifier
-static Color InterpolateOffs(bool pp_CheapShadows,
-	const PlaneStepper3* Ofs, float x, float y, float W, bool InVolume) {
+template<bool pp_CheapShadows>
+inline __attribute__((always_inline)) Color InterpolateOffs(const PlaneStepper3* Ofs, float x, float y, float W, bool InVolume) {
     Color rv;
     u32 mult = 256;
 
@@ -935,18 +1084,17 @@ static Color InterpolateOffs(bool pp_CheapShadows,
         }
     }
 
-    rv.bgra[0] = 0.5f + Ofs[0].Ip(x, y, W) * mult / 256;
-    rv.bgra[1] = 0.5f + Ofs[1].Ip(x, y, W) * mult / 256;
-    rv.bgra[2] = 0.5f + Ofs[2].Ip(x, y, W) * mult / 256;
-    rv.bgra[3] = 0.5f + Ofs[3].Ip(x, y, W);
+    rv.bgra[0] = 0.5f + Ofs[0].IpU8(x, y, W) * mult / 256;
+    rv.bgra[1] = 0.5f + Ofs[1].IpU8(x, y, W) * mult / 256;
+    rv.bgra[2] = 0.5f + Ofs[2].IpU8(x, y, W) * mult / 256;
+    rv.bgra[3] = 0.5f + Ofs[3].IpU8(x, y, W);
 
     return rv;
 }
 
 // select/calculate blend coefficient for the blend unit
-static Color BlendCoefs(
-	u32 pp_AlphaInst, bool srcOther,
-	Color src, Color dst) {
+template<u32 pp_AlphaInst, bool srcOther>
+inline __attribute__((always_inline)) Color BlendCoefs(Color src, Color dst) {
     Color rv;
 
     switch(pp_AlphaInst>>1) {
@@ -969,16 +1117,15 @@ static Color BlendCoefs(
 }
 
 // Blending Unit implementation. Alpha blend, accum buffers and such
-static bool BlendingUnit(
-	bool pp_AlphaTest, u32 pp_SrcSel, u32 pp_DstSel, u32 pp_SrcInst, u32 pp_DstInst,
-	u32 index, Color col)
+template<u32 pp_SrcSel, u32 pp_DstSel, u32 pp_SrcInst, u32 pp_DstInst>
+static void BlendingUnit(u32 index, Color col)
 {
     Color rv;
     Color src = {.raw  = pp_SrcSel ? colorBuffer2[index] : col.raw };
     Color dst = {.raw = pp_DstSel ? colorBuffer2[index] : colorBuffer1[index] };
         
-    Color src_blend = BlendCoefs(pp_SrcInst, false, src, dst);
-    Color dst_blend = BlendCoefs(pp_DstInst, true, src, dst);
+    Color src_blend = BlendCoefs<pp_SrcInst, false>(src, dst);
+    Color dst_blend = BlendCoefs<pp_DstInst, true>(src, dst);
 
     for (int j = 0; j < 4; j++)
     {
@@ -987,17 +1134,9 @@ static bool BlendingUnit(
 
     (pp_DstSel ? colorBuffer2[index] : colorBuffer1[index]) = rv.raw;
 
-    if (!pp_AlphaTest || src.a >= PT_ALPHA_REF)
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    }
 }
 
-static u8 LookupFogTable(float invW) {
+inline __attribute__((always_inline)) u8 LookupFogTable(float invW) {
     u8* fog_density=(u8*)&FOG_DENSITY;
     float fog_den_mant=fog_density[1]/128.0f;  //bit 7 -> x. bit, so [6:0] -> fraction -> /128
     s32 fog_den_exp=(s8)fog_density[0];
@@ -1033,7 +1172,8 @@ static u8 LookupFogTable(float invW) {
 }
 
 // Color Clamp and Fog a pixel
-static Color FogUnit(bool pp_Offset, bool pp_ColorClamp, u32 pp_FogCtrl, Color col, float invW, u8 offs_a) {
+template<bool pp_Offset, bool pp_ColorClamp, u32 pp_FogCtrl>
+inline __attribute__((always_inline)) Color FogUnit(Color col, float invW, u8 offs_a) {
     if (pp_ColorClamp) {
         Color clamp_max = { FOG_CLAMP_MAX };
         Color clamp_min = { FOG_CLAMP_MIN };
@@ -1093,7 +1233,7 @@ static Color FogUnit(bool pp_Offset, bool pp_ColorClamp, u32 pp_FogCtrl, Color c
     return col;
 }
 
-void DumpTexture(TSP tsp, TCW tcw) {
+void DumpTexture(TSP tsp, TCW tcw, TextureFetch_fp fetch) {
     char tex_dump[256];
     int max_mipmap = 0;
     int texU = tsp.TexU + 3;
@@ -1110,7 +1250,7 @@ void DumpTexture(TSP tsp, TCW tcw) {
 
         for (int t = 0; t < height; t++) {
             for (int s = 0; s < width; s++) {
-                tex[t * width + s] = TextureFetch(tsp, tcw, s, t, mip);
+                tex[t * width + s] = fetch(tsp, tcw, s, t, mip);
                 std::swap(tex[t * width + s].r, tex[t * width + s].b);
             }   
         }
@@ -1120,17 +1260,19 @@ void DumpTexture(TSP tsp, TCW tcw) {
     }
 }
 const char* dump_textures = nullptr;
+using BlendingUnit_fp = decltype(&BlendingUnit<0,0,0,0>);
+using ColorCombiner_fp = decltype(&ColorCombiner<0,0,0>);
+using TextureFilter_fp = decltype(&TextureFilter<0,0,0,0,0,0>);
 // Implement the full texture/shade pipeline for a pixel
-bool PixelFlush_tsp(
-	bool pp_UseAlpha, bool pp_Texture, bool pp_Offset, bool pp_ColorClamp, u32 pp_FogCtrl, bool pp_IgnoreAlpha, bool pp_ClampU, bool pp_ClampV, bool pp_FlipU, bool pp_FlipV, u32 pp_FilterMode, u32 pp_ShadInstr, bool pp_AlphaTest, u32 pp_SrcSel, u32 pp_DstSel, u32 pp_SrcInst, u32 pp_DstInst,
-	const FpuEntry *entry, float x, float y, float W, bool InVolume, u32 index)
+template<bool pp_AlphaTest, bool pp_UseAlpha, bool pp_Texture, bool pp_Offset, bool pp_ColorClamp, u32 pp_FogCtrl, bool pp_CheapShadows>
+static bool PixelFlush_tsp(const FpuEntry *entry, float x, float y, float W, bool InVolume, u32 index, TextureFetch_fp fetch, TextureFilter_fp filter, ColorCombiner_fp combiner, BlendingUnit_fp blending)
 {
-    u32 two_voume_index = InVolume & !FPU_SHAD_SCALE.intensity_shadow;
+    u32 two_voume_index = InVolume & !pp_CheapShadows;
     auto cb = (Color*)colorBuffer1 + index;
   
     Color base = { 0 }, textel = { 0 }, offs = { 0 };
 
-    base = InterpolateBase(pp_UseAlpha, FPU_SHAD_SCALE.intensity_shadow, entry->ips.Col[two_voume_index], x, y, W, InVolume);
+    base = InterpolateBase<pp_UseAlpha, pp_CheapShadows>(entry->ips.Col[two_voume_index], x, y, W, InVolume);
 
     float dTrilinear;
     u32 MipLevel;
@@ -1143,7 +1285,7 @@ bool PixelFlush_tsp(
 
             if (dumps.count(uid) == 0) {
                 dumps.insert(uid);
-                DumpTexture(entry->params.tsp[two_voume_index],  entry->params.tcw[two_voume_index]);
+                DumpTexture(entry->params.tsp[two_voume_index],  entry->params.tcw[two_voume_index], fetch);
             }
         }
         float u = entry->ips.U[two_voume_index].Ip(x, y, W);
@@ -1169,9 +1311,17 @@ bool PixelFlush_tsp(
             MipLevel = 0;
         }
         
-        textel = TextureFilter(pp_IgnoreAlpha, pp_ClampU, pp_ClampV, pp_FlipU, pp_FlipV, pp_FilterMode, entry->params.tsp[two_voume_index], entry->params.tcw[two_voume_index], u, v, MipLevel, dTrilinear);
+        textel = filter(entry->params.tsp[two_voume_index], entry->params.tcw[two_voume_index], u, v, MipLevel, dTrilinear, fetch);
         if (pp_Offset) {
-            offs = InterpolateOffs(FPU_SHAD_SCALE.intensity_shadow, entry->ips.Ofs[two_voume_index], x, y, W, InVolume);
+            offs = InterpolateOffs<pp_CheapShadows>(entry->ips.Ofs[two_voume_index], x, y, W, InVolume);
+        }
+    }
+
+    if (pp_AlphaTest) {
+        if (textel.a < PT_ALPHA_REF) {
+            return false;
+        } else {
+            textel.a = 255;
         }
     }
 
@@ -1179,133 +1329,62 @@ bool PixelFlush_tsp(
     if (pp_Texture && pp_Offset && entry->params.tcw[two_voume_index].PixelFmt == PixelBumpMap) {
         col = BumpMapper(textel, offs);
     } else {
-        col = ColorCombiner(pp_Texture, pp_Offset, pp_ShadInstr, base, textel, offs);
+        col = combiner(base, textel, offs);
     }
         
-    col = FogUnit(pp_Offset, pp_ColorClamp, pp_FogCtrl, col, 1/W, offs.a);
+    col = FogUnit<pp_Offset, pp_ColorClamp, pp_FogCtrl>(col, 1/W, offs.a);
 
     // if (pp_Texture) {
     //     col = MipDebugColor[10-MipLevel];
     // } else {
     //     col = { .raw = 0 };
     // }
-	return BlendingUnit(pp_AlphaTest, pp_SrcSel, pp_DstSel, pp_SrcInst, pp_DstInst, index, col);
+	blending(index, col);
+    return true;
 }
+using PixelFlush_tsp_fp = decltype(&PixelFlush_tsp<0,0,0,0,0,0,0>);
 
-// Depth processing for a pixel -- render_mode 0: OPAQ, 1: PT, 2: TRANS
-void PixelFlush_isp(RenderMode render_mode, u32 depth_mode, u32 ZWriteDis, float x, float y, float invW, u32 index, parameter_tag_t tag)
+#include "gentable.h"
+
+// Lookup/create cached TSP parameters, and call PixelFlush_tsp
+bool PixelFlush_tsp(bool pp_AlphaTest, const FpuEntry* entry, float x, float y, u32 index, float invW, bool InVolume)
 {
-    auto pb = tagBuffer[tagBufferA] + index;
-    auto pb2 = tagBuffer[tagBufferB] + index;
-    auto zb = depthBuffer[depthBufferA] + index;
-    auto zb2 = depthBuffer[depthBufferB] + index;
-    auto stencil = stencilBuffer + index;
+    u32 two_voume_index = InVolume & !FPU_SHAD_SCALE.intensity_shadow;
 
-    auto mode = depth_mode;
-        
-    if (render_mode == RM_PUNCHTHROUGH)
-        mode = 6; // TODO: FIXME
-    else if (render_mode == RM_TRANSLUCENT && !ISP_FEED_CFG.pre_sort)
-        mode = 3;
-    else if (render_mode == RM_MODIFIER)
-        mode = 6;
-        
-    switch(mode) {
-        // never
-        case 0: return; break;
-        // less
-        case 1: if (invW >= *zb) return; break;
-        // equal
-        case 2: if (invW != *zb) return; break;
-        // less or equal
-        case 3: if (invW > *zb) {
-            if (render_mode == RM_TRANSLUCENT && !ISP_FEED_CFG.pre_sort) {
-                MoreToDraw = true;
-            }
-            return;
-        }break;
-        // greater
-        case 4: if (invW <= *zb) return; break;
-        // not equal
-        case 5: if (invW == *zb) return; break;
-        // greater or equal
-        case 6: if (invW < *zb) return; break;
-        // always
-        case 7: break;
-    }
+    auto fetch = TextureFetch_table
+        [entry->params.tcw[two_voume_index].VQ_Comp]
+        [entry->params.tcw[two_voume_index].MipMapped]
+        [entry->params.tcw[two_voume_index].ScanOrder]
+        [entry->params.tcw[two_voume_index].StrideSel]
+        [entry->params.tcw[two_voume_index].PixelFmt];
 
-    switch (render_mode)
-    {
-        // OPAQ
-        case RM_OPAQUE:
-        {
-            // Z pre-pass only
-            if (!ZWriteDis) {
-                *zb = mask_w(invW);
-            }
-            *pb = tag;
-        }
-        break;
+    auto filter = TextureFilter_table
+        [entry->params.tsp[two_voume_index].IgnoreTexA]
+        [entry->params.tsp[two_voume_index].ClampU]
+        [entry->params.tsp[two_voume_index].ClampV]
+        [entry->params.tsp[two_voume_index].FlipU]
+        [entry->params.tsp[two_voume_index].FlipV]
+        [entry->params.tsp[two_voume_index].FilterMode];
 
-        case RM_MODIFIER:
-        {
-            // Flip on Z pass
+    auto combiner = ColorCombiner_table
+        [entry->params.isp.Texture]
+        [entry->params.isp.Offset]
+        [entry->params.tsp[two_voume_index].ShadInstr];
 
-            *stencil ^= 0b0010;
+    auto blending = BlendingUnit_table
+        [entry->params.tsp[two_voume_index].SrcSelect]
+        [entry->params.tsp[two_voume_index].DstSelect]
+        [entry->params.tsp[two_voume_index].SrcInstr]
+        [entry->params.tsp[two_voume_index].DstInstr];
+    
+    auto pixel = PixelFlush_tsp_table
+        [pp_AlphaTest]
+        [entry->params.tsp[two_voume_index].UseAlpha]
+        [entry->params.isp.Texture]
+        [entry->params.isp.Offset]
+        [entry->params.tsp[two_voume_index].ColorClamp]
+        [entry->params.tsp[two_voume_index].FogCtrl]
+        [FPU_SHAD_SCALE.intensity_shadow];
 
-            // This pixel has valid stencil for summary
-            *stencil |= 0b100;
-        }
-        break;
-
-        // PT
-        case RM_PUNCHTHROUGH:
-        {
-            
-            if (invW > *zb2)
-                return;
-
-            if (invW == *zb2) {
-                auto tagRendered = *pb2 & ~TAG_INVALID;
-
-                if (tag <= tagRendered)
-                    return;
-            }
-            
-            *zb = mask_w(invW);
-            *pb = tag;
-        }
-        break;
-
-        // Layer Peeling. zb2 holds the reference depth, zb is used to find closest to reference
-        case RM_TRANSLUCENT:
-        {
-            if (!ISP_FEED_CFG.pre_sort) {
-                if (invW < *zb2)
-                    return;
-
-                if (invW == *zb2) {
-                    auto tagRendered = *pb2 & ~TAG_INVALID;
-
-                    if (tag >= tagRendered)
-                        return;
-                }
-
-                *zb = mask_w(invW);
-
-                if (!(*pb & TAG_INVALID)) {
-                    MoreToDraw = true;
-                }
-                *pb = tag;
-            } else {
-                if (!ZWriteDis) {
-                    *zb = mask_w(invW);
-                }
-                *pb = tag;
-            }
-        }
-        break;
-
-        case RM_OP_PT_MV: die("this is invalid here"); break;
-    }
+    return pixel(entry, x, y, 1/invW, InVolume, index, fetch, filter, combiner, blending);
 }

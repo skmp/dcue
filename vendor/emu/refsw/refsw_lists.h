@@ -26,13 +26,23 @@ struct DrawParameters
 
 enum RenderMode {
     RM_OPAQUE,
-    RM_PUNCHTHROUGH,
-    RM_OP_PT_MV, // OP and PT with modvol
-    RM_TRANSLUCENT,
+    RM_PUNCHTHROUGH_PASS0,
+    RM_PUNCHTHROUGH_PASSN,
+    RM_PUNCHTHROUGH_MV, // PT MODVOL 2nd pass
+    RM_TRANSLUCENT_AUTOSORT,
+    RM_TRANSLUCENT_PRESORT,
     RM_MODIFIER,
 };
 
-#define TAG_INVALID (1 << 31)
+struct TagState {
+    union {
+        struct {
+            bool valid: 1;
+            bool rendered: 1;
+        };
+        uint8_t raw;
+    };
+};
 
 typedef u32 parameter_tag_t;
 

@@ -182,7 +182,8 @@ struct pvr2_ta_status {
     int32_t state;
     int32_t width, height; /* Tile resolution, ie 20x15 */
     int32_t tilelist_dir; /* Growth direction of the tilelist, 0 = up, 1 = down */
-    uint32_t tilelist_size; /* Size of the tilelist segments */
+    // uint32_t tilelist_size; /* Size of the tilelist segments */
+    // this needs to be current_tile_size
     uint32_t tilelist_start; /* Initial address of the tilelist */
     uint32_t polybuf_start; /* Initial bank address of the polygon buffer (ie &0x00F00000) */
     int32_t current_vertex_type;
@@ -208,6 +209,9 @@ struct pvr2_ta_status {
     struct tile_bounds last_triangle_bounds;
     struct pvr2_ta_vertex poly_vertex[8];
     uint32_t debug_output;
+
+    bool modifier_last_volume;
+    struct tile_bounds modifier_bounds;
 };
 
 static struct pvr2_ta_status ta_status;
@@ -253,13 +257,9 @@ void lxd_ta_init(u8* vram) {
     ta_status.clip.y2 = ta_status.height-1;
     uint32_t control = TA_ALLOC_CTRL; //MMIO_READ( PVR2, TA_TILECFG );
     ta_status.tilelist_dir = (control >> 20) & 0x01;
-    ta_status.tilelist_size = tilematrix_sizes[ (control & 0x03) ];
     TA_ISP_CURRENT = TA_ISP_BASE;
     //MMIO_WRITE( PVR2, TA_POLYPOS, MMIO_READ( PVR2, TA_POLYBASE ) );
     uint32_t plistpos = TA_NEXT_OPB_INIT >> 2; //MMIO_READ( PVR2, TA_LISTBASE )
-    if( ta_status.tilelist_dir == TA_GROW_DOWN ) {
-        plistpos -= ta_status.tilelist_size;
-    }
     TA_NEXT_OPB = plistpos;
     //MMIO_WRITE( PVR2, TA_LISTPOS, plistpos );
     ta_status.tilelist_start = plistpos;
@@ -433,7 +433,9 @@ static uint32_t ta_alloc_tilelist( uint32_t reference ) {
     uint32_t limit = TA_OL_LIMIT >> 2;//MMIO_READ( PVR2, TA_LISTEND ) >> 2;
     uint32_t newposn;
     if( ta_status.tilelist_dir == TA_GROW_DOWN ) {
-        newposn = posn - ta_status.tilelist_size;
+        // printf("**TA WARNING**: Allocating tilelist in GROW_DOWN mode\n");
+        posn -= ta_status.current_tile_size;
+        newposn = posn;
         if( posn == limit ) {
             PVRRAM(posn<<2) = 0xF0000000;
             PVRRAM(reference) = 0xE0000000 | (posn<<2);
@@ -442,7 +444,7 @@ static uint32_t ta_alloc_tilelist( uint32_t reference ) {
             PVRRAM(reference) = 0xE0000000 | (posn<<2);
             return TA_NO_ALLOC;
         } else if( newposn <= limit ) {
-        } else if( newposn <= (limit + ta_status.tilelist_size) ) {
+        } else if( newposn <= (limit + ta_status.current_tile_size) ) {
             // asic_RaiseInterrupt(holly_MATR_NOMEM);
             pvr_queue_interrupt(ASIC_EVT_PVR_OPB_OUTOFMEM);
             printf("TA error: holly_MATR_NOMEM. Interrupt raised\n");
@@ -456,7 +458,7 @@ static uint32_t ta_alloc_tilelist( uint32_t reference ) {
         PVRRAM(reference) = 0xE0000000 | (posn<<2);
         return posn << 2;
     } else {
-        newposn = posn + ta_status.tilelist_size;
+        newposn = posn + ta_status.current_tile_size;
         if( posn == limit ) {
             PVRRAM(posn<<2) = 0xF0000000;
             PVRRAM(reference) = 0xE0000000 | (posn<<2);
@@ -465,7 +467,7 @@ static uint32_t ta_alloc_tilelist( uint32_t reference ) {
             PVRRAM(reference) = 0xE0000000 | (posn<<2);
             return TA_NO_ALLOC;
         } else if( newposn >= limit ) {
-        } else if( newposn >= (limit - ta_status.tilelist_size) ) {
+        } else if( newposn >= (limit - ta_status.current_tile_size) ) {
             // asic_RaiseInterrupt(holly_MATR_NOMEM);
             pvr_queue_interrupt(ASIC_EVT_PVR_OPB_OUTOFMEM);
             printf("TA error: holly_MATR_NOMEM. Interrupt raised\n");
@@ -620,6 +622,17 @@ static void ta_commit_polygon( ) {
     if( polygon_bound.x2 >= ta_status.width ) polygon_bound.x2 = ta_status.width-1;
     if( polygon_bound.y1 < 0 ) polygon_bound.y1 = 0;
     if( polygon_bound.y2 >= ta_status.height ) polygon_bound.y2 = ta_status.height-1;
+
+    if (ta_status.current_vertex_type == TA_VERTEX_MOD_VOLUME) {
+        ta_status.modifier_bounds.x1 = MIN(ta_status.modifier_bounds.x1, polygon_bound.x1);
+        ta_status.modifier_bounds.x2 = MAX(ta_status.modifier_bounds.x2, polygon_bound.x2);
+        ta_status.modifier_bounds.y1 = MIN(ta_status.modifier_bounds.y1, polygon_bound.y1);
+        ta_status.modifier_bounds.y2 = MAX(ta_status.modifier_bounds.y2, polygon_bound.y2);
+    
+        if (ta_status.modifier_last_volume) {
+            polygon_bound = ta_status.modifier_bounds;
+        }
+    }
 
     /* Set the "single tile" flag if it's entirely contained in 1 tile */
     if( polygon_bound.x1 == polygon_bound.x2 &&
@@ -843,6 +856,14 @@ static void ta_parse_modifier_context( union ta_data *data ) {
     ta_status.vertex_count = 0;
     ta_status.max_vertex = 3;
     ta_status.poly_pointer = 0;
+
+    if (ta_status.modifier_last_volume) {
+        ta_status.modifier_bounds.x1 = INT_MAX/32;
+        ta_status.modifier_bounds.y1 = INT_MAX/32;
+        ta_status.modifier_bounds.x2 = -1;
+        ta_status.modifier_bounds.y2 = -1;
+    }
+    ta_status.modifier_last_volume = data[0].i & TA_POLYCMD_FULLMOD;
 }
 
 /**
@@ -1006,7 +1027,11 @@ static void ta_parse_vertex( union ta_data *data ) {
         vertex++;
         vertex->x = data[7].f;
         ta_status.vertex_count += 2;
-        ta_status.state = STATE_EXPECT_VERTEX_BLOCK2;
+        if (ta_status.current_vertex_type  == TA_VERTEX_SPRITE || ta_status.current_vertex_type == TA_VERTEX_TEX_SPRITE) {
+            ta_status.state = STATE_EXPECT_END_VERTEX_BLOCK2;
+        } else {
+            ta_status.state = STATE_EXPECT_VERTEX_BLOCK2;
+        }
         break;
     }
     ta_status.vertex_count++;

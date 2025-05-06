@@ -14,9 +14,9 @@
 #endif
 
 u32 detwiddle[2][11][1024];
-u8 BM_SIN90[256];
-u8 BM_COS90[256];
-u8 BM_COS360[256];
+s8 BM_SIN90[256];
+s8 BM_COS90[256];
+s8 BM_COS360[256];
 
 //input : address in the yyyyyxxxxx format
 //output : address in the xyxyxyxy format
@@ -70,9 +70,9 @@ void BuildTables()
 	}
 
 	for (int i = 0; i < 256; i++) {
-		BM_SIN90[i]  = 255 * sinf((i / 256.0f) * (M_PI / 2));
-		BM_COS90[i]  = 255 * cosf((i / 256.0f) * (M_PI / 2));
-		BM_COS360[i] = 255 * cosf((i / 256.0f) * (2 * M_PI));
+		BM_SIN90[i]  = 127 * sinf((i / 256.0f) * (M_PI / 2));
+		BM_COS90[i]  = 127 * cosf((i / 256.0f) * (M_PI / 2));
+		BM_COS360[i] = 127 * cosf((i / 256.0f) * (2 * M_PI));
 	}
 	
 }

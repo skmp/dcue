@@ -39,6 +39,10 @@ struct PlaneStepper3
 
         float C = ((v2.x - v1.x) * (v3.y - v1.y) - (v3.x - v1.x) * (v2.y - v1.y));
         
+        if (C == 0) {
+            C = 1; // avoid divide by zero
+        }
+
         ddx = -Aa / C;
         ddy = -Ba / C;
 
@@ -53,6 +57,16 @@ struct PlaneStepper3
     float Ip(float x, float y, float W) const
     {
         return Ip(x, y) * W;
+    }
+
+    float IpU8(float x, float y, float W) const
+    {
+        float rv = Ip(x, y, W);
+
+        if (rv < 0) rv = 0;
+        if (rv > 255) rv = 255;
+
+        return rv;
     }
 };
 
@@ -87,8 +101,8 @@ struct IPs3
         }
 
         if (TwoVolumes) {
-            U[1].Setup(rect, v1, v2, v3, v1.u * v1.z, v2.u1 * v2.z, v3.u1 * v3.z);
-            V[1].Setup(rect, v1, v2, v3, v1.v * v1.z, v2.v1 * v2.z, v3.v1 * v3.z);
+            U[1].Setup(rect, v1, v2, v3, v1.u1 * v1.z, v2.u1 * v2.z, v3.u1 * v3.z);
+            V[1].Setup(rect, v1, v2, v3, v1.v1 * v1.z, v2.v1 * v2.z, v3.v1 * v3.z);
             if (params->isp.Gouraud) {
                 for (int i = 0; i < 4; i++)
                     Col[1][i].Setup(rect, v1, v2, v3, v1.col1[i] * v1.z, v2.col1[i] * v2.z, v3.col1[i] * v3.z);
@@ -128,10 +142,9 @@ extern u32  colorBuffer1 [MAX_RENDER_PIXELS];
 extern const char* dump_textures;
 
 void ClearBuffers(u32 paramValue, float depthValue, u32 stencilValue);
-void ClearParamBuffer(parameter_tag_t paramValue);
+void ClearParamStatusBuffer();
 void PeelBuffers(float depthValue, u32 stencilValue);
 void PeelBuffersPT();
-void PeelBuffersPTAfterHoles();
 void PeelBuffersPTInitial(float depthValue);
 void SummarizeStencilOr();
 void SummarizeStencilAnd();
@@ -140,30 +153,28 @@ bool GetMoreToDraw();
 
 // Render to ACCUM from TAG buffer
 // TAG holds references to triangles, ACCUM is the tile framebuffer
-void RenderParamTags(RenderMode rm, int tileX, int tileY);
-void ClearFpuEntries();
+template<RenderMode rm>
+void RenderParamTags(int tileX, int tileY);
 
-f32 f16(u16 v);
+inline __attribute__((always_inline)) f32 f16(u16 v)
+{
+    u32 z=v<<16;
+    return *(f32*)&z;
+}
 
 //decode a vertex in the native pvr format
 void decode_pvr_vertex(DrawParameters* params, pvr32addr_t ptr,Vertex* cv, u32 shadow);
 // decode an object (params + vertexes)
 u32 decode_pvr_vertices(DrawParameters* params, pvr32addr_t base, u32 skip, u32 two_volumes, Vertex* vtx, int count, int offset);
 
-FpuEntry GetFpuEntry(taRECT *rect, RenderMode render_mode, ISP_BACKGND_T_type core_tag);
+const FpuEntry& GetFpuEntry(taRECT *rect, RenderMode render_mode, ISP_BACKGND_T_type core_tag);
 // Lookup/create cached TSP parameters, and call PixelFlush_tsp
-bool PixelFlush_tsp(bool pp_AlphaTest, FpuEntry* entry, float x, float y, u32 index, float invW, bool InVolume);
+bool PixelFlush_tsp(bool pp_AlphaTest, const FpuEntry* entry, float x, float y, u32 index, float invW, bool InVolume);
 // Rasterize a single triangle to ISP (or ISP+TSP for PT)
-void RasterizeTriangle(RenderMode render_mode, DrawParameters* params, parameter_tag_t tag, const Vertex& v1, const Vertex& v2, const Vertex& v3, const Vertex* v4, taRECT* area);
+
+extern void (*RasterizeTriangle_table[])(DrawParameters* params, parameter_tag_t tag, const Vertex& v1, const Vertex& v2, const Vertex& v3, const Vertex* v4, taRECT* area);
+
 u8* GetColorOutputBuffer();
-
-// Implement the full texture/shade pipeline for a pixel
-bool PixelFlush_tsp(
-    bool pp_UseAlpha, bool pp_Texture, bool pp_Offset, bool pp_ColorClamp, u32 pp_FogCtrl, bool pp_IgnoreAlpha, bool pp_ClampU, bool pp_ClampV, bool pp_FlipU, bool pp_FlipV, u32 pp_FilterMode, u32 pp_ShadInstr, bool pp_AlphaTest, u32 pp_SrcSel, u32 pp_DstSel, u32 pp_SrcInst, u32 pp_DstInst,
-    const FpuEntry *entry, float x, float y, float W, bool InVolume, u32 index);
-
-// Depth processing for a pixel -- render_mode 0: OPAQ, 1: PT, 2: TRANS
-void PixelFlush_isp(RenderMode render_mode, u32 depth_mode, u32 ZWriteDis, float x, float y, float invW, u32 index, parameter_tag_t tag);
 
 
 /*
@@ -181,3 +192,4 @@ void RenderQuadArray(RenderMode render_mode, ObjectListEntry obj, taRECT* rect);
 void RenderObjectList(RenderMode render_mode, pvr32addr_t base, taRECT* rect);
 void RenderCORE();
 void Hackpresent();
+void ClearFpuCache();
