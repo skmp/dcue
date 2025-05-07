@@ -188,6 +188,10 @@ void RenderParamTags(int tileX, int tileY) {
                         tagStatus[index].rendered = true;
                     }
                 }
+
+                if (rm == RM_TRANSLUCENT_PRESORT) {
+                    tagStatus[index].valid = false;
+                }
             }
         }
     }
