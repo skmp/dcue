@@ -3717,7 +3717,7 @@ bool interactable_t::showMessage() {
 
 			bool isLast = messages[inspectionCounter] == nullptr;
 
-			assert(!strncmp("##", message, 2) == 0);
+			assert(strncmp("##", message, 2) != 0);
 
 			// TODO
 			// messaging.TypeMessage(this, message, (!isLast || AlwaysShowHasModeIndicator) && ShowHasMoreIndicator, SpeakerName);
@@ -3973,7 +3973,7 @@ void fadeout_t::interact() {
 game_object_t* playa;
 
 
-template<float maxDistance>
+template<int maxDistance>
 struct GroundRaycastCallback: public reactphysics3d::RaycastCallback {
 	float distance = maxDistance;
 
@@ -4017,7 +4017,7 @@ void player_movement_t::update(float deltaTime) {
 	}
 
 	if (movement != 0) {
-		GroundRaycastCallback<10.f> moveCheck;
+		GroundRaycastCallback<10> moveCheck;
 	
 		reactphysics3d::Vector3 playaPos = {playa->ltw.pos.x, playa->ltw.pos.y + 3.8f/2, playa->ltw.pos.z}; // TODO: the 3.8f should come from the character controller
 		V3d playerAt = normalize(playa->ltw.at);
@@ -4046,7 +4046,7 @@ void player_movement_t::update(float deltaTime) {
 		if (lastPos.x != playa->ltw.pos.x || lastPos.y != playa->ltw.pos.y || lastPos.z != playa->ltw.pos.z) {
 			lastPos = playa->ltw.pos;
 			reactphysics3d::Vector3 downAt = { 0, -1, 0 };
-			GroundRaycastCallback<10.f> groundCheck1, groundCheck2;
+			GroundRaycastCallback<10> groundCheck1, groundCheck2;
 			
 
 			reactphysics3d::Vector3 playaPos1 = {playa->ltw.pos.x+0.2f, playa->ltw.pos.y, playa->ltw.pos.z};
@@ -4065,7 +4065,7 @@ void player_movement_t::update(float deltaTime) {
 	}
 }
 
-template<float maxDistance>
+template<int maxDistance>
 struct LookAtCheck: public reactphysics3d::RaycastCallback {
 	box_collider_t* collider = nullptr;
 	float distance = 1000;
@@ -4130,7 +4130,7 @@ void mouse_look_t::update(float deltaTime) {
 			}
 		} else {
 			bool Handled = false;
-			LookAtCheck<50.f> lookAtChecker;
+			LookAtCheck<50> lookAtChecker;
 
 			reactphysics3d::Vector3 cameraPos = {gameObject->ltw.pos.x, gameObject->ltw.pos.y, gameObject->ltw.pos.z};
 			V3d cameraAtNrm = normalize(gameObject->ltw.at);
@@ -4254,7 +4254,7 @@ void mouse_look_t::update(float deltaTime) {
 }
 
 void interactable_message_t::update(game_object_t* mainCamera) {
-	LookAtCheck<25.f> lookAtChecker;
+	LookAtCheck<25> lookAtChecker;
 
 	reactphysics3d::Vector3 cameraPos = {mainCamera->ltw.pos.x, mainCamera->ltw.pos.y, mainCamera->ltw.pos.z};
 	V3d cameraAtNrm = normalize(mainCamera->ltw.at);
